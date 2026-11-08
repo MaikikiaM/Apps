@@ -1,0 +1,474 @@
+================================================================================
+REGISTRO CRONOLÓGICO CONTINUO DE DESARROLLO - SPOTILOCAL
+Archivo: registro_proyecto.text
+Regla de oro: NUNCA sobrescribir ni borrar contenido anterior. Modo APPEND continuo.
+================================================================================
+
+================================================================================
+[FASE 1: 09/08/2026 - 10/08/2026 | BLOQUES v1.1.0 A v1.4.4]
+Hito: Origen de SpotiLocal, Prototipo PWA y Migración a Motor Nativo Capacitor
+Compilaciones: #1 (v1.1) a #35 (v1.4.4)
+================================================================================
+1. CONTEXTO Y PROMPTS INICIALES:
+   - Creación de un reproductor de música local offline y de red LAN con estética profesional idéntica a Spotify (modo oscuro, carátulas en alta resolución, tipografía Circular/Inter, controles multimedia).
+   - Necesidad de superar las restricciones del navegador móvil (reproducción en segundo plano, control de volumen nativo y lectura de etiquetas ID3 sin servidor central).
+2. DECISIONES DE ARQUITECTURA Y LÓGICA:
+   - Interfaz Web / PWA (HTML5, CSS modular en styles.css y app.js):
+     * Arquitectura cliente-servidor ultraligera con server.js en Node.js para streaming HTTP Range (soporte de 206 Partial Content para seek fluido sin descargar archivos completos).
+     * id3-parser.js: parser cliente-side de metadatos ID3v1 y ID3v2 para extraer título, artista, álbum y carátulas incrustadas en formato Blob/ArrayBuffer.
+     * audio-engine.js: motor de audio basado en Web Audio API con ecualizador de 5 bandas y analizador en tiempo real para visualizador en Canvas.
+   - Migración a Android Nativo (Capacitor):
+     * En v1.2.2 (antigua v2.8), se incorporó el puente nativo Capacitor (com.spotilocal.app) para permitir que la app se instale como APK independiente.
+     * Creación de NativeAudioStore y NativePlayerBridge para gestionar la caché local de archivos.
+3. ARCHIVOS CREADOS / MODIFICADOS:
+   - index.html, styles.css, app.js, server.js, audio-engine.js, id3-parser.js
+   - apk-build/android/ (Proyecto base Capacitor con Gradle)
+4. COMPILACIONES DESTACADAS:
+   - v1.1 (#1 | 09/08/2026 19:32): Primer APK SpotiLocal en WebView.
+   - v1.2.2 (#13 | 10/08/2026 02:16): Primera integración de Capacitor y puente nativo Android.
+   - v1.4.4 (#35 | 10/08/2026 18:19): Cierre del ciclo inicial v2 con cola y gestos táctiles.
+
+================================================================================
+[FASE 2: 15/08/2026 | BLOQUES v1.4.5 A v1.5.1]
+Hito: Rama Experimental SpotiPirata, Letras Sincronizadas LRC y Compatibilidad
+Compilaciones: #36 (v1.4.5) a #42 (v1.5.1)
+================================================================================
+1. CONTEXTO Y PROMPTS:
+   - Pruebas de compatibilidad con Android 14 (gestión estricta de permisos de Foreground Service y audio local).
+   - Necesidad de soporte para letras sincronizadas en tiempo real tipo Spotify Karaoke.
+2. DECISIONES DE ARQUITECTURA:
+   - Integración de visor de letras LRC: parser de marcas de tiempo [mm:ss.xx] con auto-scroll fluido y resaltado activo de la línea cantada.
+   - Visualizador de ondas en canvas reactivo al espectro de frecuencias.
+   - Guardado persistente de configuraciones y preferencias de usuario.
+3. ARCHIVOS MODIFICADOS:
+   - app.js, index.html, styles.css
+4. COMPILACIONES:
+   - v1.4.5 (#36 | 15/08/2026 19:02) a v1.5.1 (#42 | 15/08/2026 20:30).
+
+================================================================================
+[FASE 3: 09/09/2026 | BLOQUES v1.5.2 A v1.5.9]
+Hito: Integración Nativa de Google ExoPlayer (Media3) y Ecualizador de 24 Bandas
+Compilaciones: #43 (v1.5.2) a #50 (v1.5.9)
+================================================================================
+1. CONTEXTO Y PROMPTS:
+   - Problema detectado: MediaPlayer estándar de Android y WebView sufrían cortes de audio y paradas al bloquear la pantalla o cambiar de aplicación.
+   - Requisito de un ecualizador profesional de alta resolución y reordenación visual de cola.
+2. DECISIONES DE ARQUITECTURA:
+   - Sustitución del motor por Google ExoPlayer (androidx.media3:media3-exoplayer:1.5.1, media3-session, media3-datasource).
+   - Implementación de PlaybackService.java: Foreground Service nativo con notificación persistente multimedia, MediaSession integrada y control desde la pantalla de bloqueo y dispositivos Bluetooth.
+   - Ecualizador de 24 bandas paramétricas (eq24) implementado en Java con ecualización de precisión auditiva.
+   - Modal interactivo de cola con reordenación drag & drop en vivo.
+3. ARCHIVOS MODIFICADOS:
+   - PlaybackService.java (creación del servicio nativo Media3)
+   - NativePlayerBridge.java (enlace JavaScript-Java con anotaciones @JavascriptInterface)
+   - build.gradle (dependencias Media3)
+   - app.js (control de sincronización de cola ExoPlayer)
+4. COMPILACIONES:
+   - v1.5.5 (#46 | 09/09/2026 20:15): Primera versión con ExoPlayer nativo integrado.
+   - v1.5.7 (#48 | 09/09/2026 20:39): Ecualizador de 24 bandas activo.
+   - v1.5.9 (#50 | 09/09/2026 20:53): Modal de cola visual completado.
+
+================================================================================
+[FASE 4: 10/09/2026 - 27/09/2026 | BLOQUES v1.6.0 A v1.6.9]
+Hito: Modo Offline Completo con IndexedDB y Tracking de Estadísticas en Reposo
+Compilaciones: #51 (v1.6.0) a #60 (v1.6.9)
+================================================================================
+1. PROMPTS LITERALES DEL USUARIO:
+   - [12/09/2026 17:30:23]: "Hola, vamos a trabjar sobre la app para parchear un problema de las estadisticas que no se cuentan los minutos si estas fuera de la app (todo el resto de cosas funciona a la perfeccion). Como es muy importante no romper la app, antes de hacer nada informate de absolutamente todo y me dices si tienes alguna duda de algo"
+   - [12/09/2026 17:42:38]: "Estas 100% seguro de que no has roto ninguna funcion?"
+   - [14/09/2026 23:35:06]: "Te comento. Ahora las stats y todo funciona muy bien (aunque admito que la aleatoriedad...)"
+   - [14/09/2026 23:47:54]: "Antes de esta nueva update ya pasaba: Los losgos en la clasificacion estan bugeados..."
+   - [17/09/2026 16:51:15]: "Por algun motivo, cada vez que abro la app se queda en negro y tengo que cerrar y volver a abrirla..."
+   - [20/09/2026 23:27:58]: "pq ocupa menos el archivo ahora"
+   - [27/09/2026 16:42:27]: "Se sigue congelando cada vez que lo abro. Ademas, añado que desde hace varias updates se bugean las canciones que no tienen caratula..."
+2. DECISIONES DE ARQUITECTURA:
+   - db.js (IndexedDB SpotiLocalDB v2):
+     * Arquitectura de separación de almacenamiento: almacén songs para metadatos ligeros (garantiza lecturas de 0 ms en búsquedas y renderizado) y almacén dedicado song_blobs para los archivos de audio pesado (evita fugas de memoria RAM y congelaciones de UI).
+   - Sincronización NativeAudioStore:
+     * Los blobs guardados en IndexedDB se transmiten al almacenamiento nativo de la app para que ExoPlayer los reproduzca como archivos locales FileUri en Android sin dependencia de red.
+   - Tracking Atómico de Estadísticas en Reposo:
+     * PlaybackService.java cuenta continuamente los segundos reales transcurridos mediante SystemClock.elapsedRealtime().
+     * Alerta scrobble al superar el 50% de la pista.
+     * Persistencia en SharedPreferences y drenaje atómico a app.js y db.js al abrir la aplicación.
+3. COMPILACIONES:
+   - v1.6.0 (#51 | 10/09/2026 10:34): Descarga offline en IndexedDB.
+   - v1.6.3 (#54 | 10/09/2026 11:53): Versión offline móvil estable.
+   - v1.6.5 (#56 | 12/09/2026 17:37): Contador de tiempo en segundo plano y estadísticas.
+   - v1.6.9 (#60 | 27/09/2026 16:51): Hidratación de estadísticas en arranque en frío.
+
+================================================================================
+[FASE 5: 31/10/2026 - 02/11/2026 | BLOQUES v1.7.0 A v1.7.2]
+Hitos: Bucle Infinito Continuo y Unificación de Categorías Anuales vs Históricas
+Compilaciones: #61 (v1.7.0) a #63 (v1.7.2)
+================================================================================
+1. PROMPTS DEL USUARIO:
+   - "una cosa que no me gusta es que si pongo por ejemplo la ultima del ranking, no salta al principio del ranking para la siguiente cancion o a cualqueir otra. Quiero que sea continua la musica siempre. Que nunca pueda acabarse el bucle /plan"
+   - "quiero que 'este año' muestre lo que he escuhado ESTE AÑO y el historico que muestre el TOTAL. Tan dificil es literalmente poner las categorias bien?"
+2. DECISIONES DE ARQUITECTURA:
+   - Modo de repetición infinita:
+     * ExoPlayer configurado permanentemente con Player.REPEAT_MODE_ALL en PlaybackService.java.
+     * En app.js, si se alcanza el final de una lista o ranking, se enlaza automáticamente con el inicio, manteniendo la música sonando ininterrumpidamente.
+   - Métricas y Estadísticas Anuales vs Totales:
+     * db.js y app.js depurados para filtrar de manera estricta los eventos timestamped dentro del año actual (1 de enero a 31 de diciembre de 2026) para la tarjeta "Este Año".
+     * La tarjeta "Histórico" acumula el 100% de la actividad registrada en la base de datos sin límite temporal.
+3. ARCHIVOS MODIFICADOS:
+   - app.js, db.js, index.html, PlaybackService.java
+4. COMPILACIONES:
+   - v1.7.0 (#61 | 31/10/2026 18:39): Optimización de reanudación y shuffle seguro con crypto RNG.
+   - v1.7.1 (#62 | 31/10/2026 19:51): Bucle infinito en todas las listas.
+   - v1.7.2 (#63 | 02/11/2026 17:50): Corrección estricta de categorías estadísticas.
+
+================================================================================
+[FASE 6: 03/11/2026 | BLOQUE v1.7.3]
+Hito: Continuidad Total de Pausa en Reposo (FGS Persistente) y Normalización Odométrica de Versiones
+Compilaciones: #64 (v1.7.3)
+================================================================================
+1. PROMPTS DEL USUARIO:
+   - "Sigo perdiendo la continuidad de la app. O sea, sigo perdiendo el que este la musica pausada enseguida. En cuanto la pauso, practicamente de forma inmediata ya no puedo reanudarla sin entrar en la app antes"
+   - "Podrias investigar todas las versiones realizadas y por fecha de modificacion entregarles versiones? Quiero que cada numero principal cambie tras completar 9 secundarios (que no haya 1.10, como mucho 1.9) y que cada secundario varie cada 9 terciarios; que haya 1,2,3... de la forma, por ejemplo: 1.8 y 1.8.2, es decir, que realmente haya 10 posibles versiones para un secundario. El numero principal es el 1, el secundario el 8 y el terciario el 2 en el ejemplo de 1.8.2 /plan"
+2. DECISIONES DE ARQUITECTURA:
+   - Continuidad de Pausa en Segundo Plano:
+     * Causa identificada: OxygenOS/Android congela el proceso si la notificación se degrada a dismissible en pausa.
+     * PlaybackService.java: override de onUpdateNotification(session, startInForegroundRequired) para mantener el Foreground Service activo (mediaPlayback) aun estando en pausa.
+     * Timeout de inactividad de 3 horas continuas de pausa antes del apagado automático para no gastar batería innecesaria.
+     * Cero consumo de CPU en pausa: ticker detenido mientras isPlaying == false.
+     * NativeAudioStore.java: soporte de transferencias concurrentes multi-stream mediante transferId único para evitar colisiones entre precarga y reproducción.
+   - Normalización Odométrica de Versiones:
+     * Se investigaron los 66 APKs en disco mediante SHA-256 y fecha LastWriteTime, encontrando 64 compilaciones binarias únicas y 2 duplicados/alias.
+     * Creación de la carpeta versions/ y archivo ordenado de los 64 APKs renombrados con nomenclatura homogénea (v1.1 a v1.7.3).
+     * Sincronización del proyecto a v1.7.3 (Código 15) en app-version.json, build.gradle, app.js e index.html.
+3. COMPILACIÓN:
+   - Gradle assembleDebug: BUILD SUCCESSFUL in 12s.
+   - APK: SpotiLocal_v1.7.3.apk (7,455,176 bytes | SHA-256: A7ED6C28BD80B779FA85E78EED02D51BAD98E6937DFB40A3FDEDF5EE365AA2C9).
+
+================================================================================
+[FASE 7: 04/11/2026 | BLOQUES v1.7.4 A v1.7.7]
+Hito: Suite de Recorte de Canciones, Herramientas de Audio para Música Pirata y Directivas de Auditoría Continua
+Compilaciones: #65 (v1.7.4) a #68 (v1.7.7)
+================================================================================
+1. PROMPTS LITERALES DEL USUARIO:
+   - [04/11/2026 12:10]: "Quiero añadir una funcion para acortar las canciones. Es decir, como yo descargo de forma pirata, a veces hay por ejemplo aplausos o cosas. Quiero tener la opcion de cortar cachos. Antes de que hagamos nada, quiero que pienses si puede haber alguna otra mejora que no suela estar en spotify pero que en nuestro contexto sí nos resulte util /plan"
+   - [04/11/2026 12:20]: "cuantas versiones ha habido ya? por curiosidad"
+   - [04/11/2026 12:22]: "Estas registrando todo en cada .tex?"
+   - [04/11/2026 12:24]: "estas trabajando de esta forma?
+     Eres mi asistente de desarrollo y debes cumplir estrictamente dos directivas operativas permanentes en todas tus intervenciones:
+     1. CABECERA DE TIEMPO OBLIGATORIA: ⏱️ [Prompt: HH:MM:SS | Respuesta: HH:MM:SS]
+     2. REGISTRO CRONOLÓGICO CONTINUO EN UN ARCHIVO .TEXT (registro_proyecto.text) en modo append."
+   - [04/11/2026 12:27]: "Bueno, no pasa nada por empezarlo ahora. Crees que puedes completarlo con las sesiones anteriores? de forma detallada o es muy tarde? Requieres que te de espacio en un repositorio de github?"
+   - [04/11/2026 12:35]: "Claro, pero por ejemplo mis promtps no has podido imagino"
+   - [04/11/2026 12:37]: "Nah, no hace falta un github porque este proyecto no es tan grande como otros y ya tenemos un historico de versiones excelente"
+   - [04/11/2026 12:45]: "por algun motivo no puedo poner el recorte para despues de 3 minutos. el fin"
+   - [04/11/2026 13:14]: "como funciona lo de los recortes? Ahora si veo que puedo bajarlo al numero pero no veo como se traslada a la cancion"
+   - [04/11/2026 13:38]: "que sistema es el que estas usando que edita el tamaño de forma  automatica? esta bastante bien"
+   - [04/11/2026 13:42]: "tengo la opcion dedesactivar esa funcion?"
+   - [04/11/2026 13:45]: "pero no se recorta sola actualmente? Y me molaria la opcion A"
+   - [04/11/2026 14:16]: "Obviamente los recortes son una unica fase. es una tonteria que 7 versiones correspondan a 7 fases y 61 versiones anteriores a 5"
+
+2. DECISIONES DE ARQUITECTURA Y EVOLUCIÓN TÉCNICA DE LA FASE:
+   - Hito 7.1 (v1.7.4 | Compilación #65):
+     * Motor de Recorte Virtual no destructivo (sin re-codificación, sin pérdida acústica y sin duplicar archivos en almacenamiento).
+     * Integración con ExoPlayer (MediaItem.ClippingConfiguration) y Web Audio (timeupdate).
+     * Auto-detección de silencios acústicos mediante análisis RMS en ventanas de 50ms sobre AudioBuffer.
+     * Nivelador de volumen por canción (gainDb) y limpiador inteligente de metadatos de YouTube.
+     * Adopción de Directivas Operativas Permanentes (Cabecera horaria obligatoria y registro continuo en .text).
+     * Ratificación de gestión 100% local (autonomía mediante el catálogo versions/ sin GitHub).
+   - Hito 7.2 (v1.7.5 | Compilación #66):
+     * Corrección del cuello de botella de 180s: eliminación de topes rígidos de 3 minutos en app.js y recálculo visual de porcentajes.
+     * Sonda asíncrona no invasiva de duración (resolveSongDuration) mediante lectura de ExoPlayer Timeline (Timeline.Period.getDurationMs()) y audio probe metadata.
+     * Auto-expansión dinámica de la escala del deslizador al avanzar con botones táctiles (+0.5s y 📍 Aquí).
+   - Hito 7.3 (v1.7.6 | Compilación #67):
+     * Aplicación inmediata en caliente (Hot-Reload) en ExoPlayer: firma enriquecida de cola (signatureBuilder) y reemplazo dinámico (player.replaceMediaItem) del ítem en reproducción.
+     * Distintivo visual en biblioteca: etiqueta verde ✂️ Recortada y resaltado de controles para canciones con recorte activo.
+   - Hito 7.4 (v1.7.7 | Compilación #68):
+     * Implementación del interruptor On/Off individual por canción (toggle-trim-enabled) en el modal de recorte.
+     * Reversibilidad instantánea: permite desactivar el recorte y escuchar la versión completa sin perder ni borrar las marcas de tiempo configuradas.
+     * Reorganización y consolidación del registro del proyecto en 7 fases reales y balanceadas.
+
+3. ARCHIVOS MODIFICADOS EN LA FASE:
+   - apk-build/android/app/src/main/java/com/spotilocal/app/PlaybackService.java
+   - apk-build/android/app/src/main/java/com/spotilocal/app/NativePlayerBridge.java
+   - db.js
+   - app.js
+   - index.html
+   - styles.css
+   - app-version.json
+   - apk-build/android/app/build.gradle
+   - registro_proyecto.text
+
+4. COMPILACIONES DE LA FASE 7 (v1.7.4 A v1.7.7):
+   - v1.7.4 (#65 | 04/11/2026 12:13): 7,464,268 bytes | SHA-256: C1F2113B2755E9AE0959ED8D1D648F21197ACDB2ECFC769828991006E5CEA764
+   - v1.7.5 (#66 | 04/11/2026 12:55): 7,466,028 bytes | SHA-256: 7D927EE92F55189508816B2C30E793D38C8B7ABA33E117AA9010BD636E1FA74D
+   - v1.7.6 (#67 | 04/11/2026 13:19): 7,466,628 bytes | SHA-256: A15084255081345BCC2C91EAA00612FFB9709EFC3D230DAB67091D9C69A749C1
+   - v1.7.7 (#68 | 04/11/2026 13:51): 7,467,972 bytes | SHA-256: 657DA3F59B2D5C1B336DB228F5E516D4186A357C4F5FA0FC1FE6BF7859C40061
+================================================================================
+
+================================================================================
+AUDITORÍA DE TIEMPO Y SESIÓN (04/11/2026):
+- Ventana temporal de actividad: 11:53:34 - 15:11:00 (Duración: ~3h 17m continuos).
+- Compilaciones entregadas: 4 builds (#65 a #68 / v1.7.4 - v1.7.7).
+- Hitos completados: Recorte virtual no destructivo, sonda de duración sin límite de 180s, hot-reload en ExoPlayer, interruptor On/Off individual y consolidación en 7 fases del proyecto.
+================================================================================
+
+- Desglose de telemetría de procesamiento IA (04/11/2026):
+  * Tiempo activo de computación IA (pensamiento, edición de código y compilaciones Gradle): 50.0 minutos (25.2% del tiempo total).
+  * Tiempo de espera pasiva (pruebas en móvil por el usuario, escucha y redacción): 148.6 minutos (74.8% del tiempo total).
+  * Total sesión: 198.6 minutos (~3h 18m).
+================================================================================
+
+- Auditoría de Consumo de Tokens y Coste API (Gemini 3.8 Flash) en la sesión del 04/11/2026:
+  * Llamadas procesadas: 351 pasos / interacciones.
+  * Tokens de Entrada directa (no cacheados): 2,065,177 tokens.
+  * Tokens de Context Caching (cache read): 47,849,189 tokens (95.9% de tasa de caché).
+  * Tokens de Salida (pensamiento y generación): 209,253 tokens.
+  * Volumen total de contexto evaluado: 49,914,366 tokens.
+  * Coste real con Context Caching (tarifa vigente $0.75/$0.075/$3.75 por 1M): $5.92 USD (~5.63 EUR).
+  * Ahorro por Context Caching vs procesamiento bruto: 84.5% ($32.30 USD ahorrados).
+================================================================================
+
+- Comando /usage ejecutado (04/11/2026 15:17):
+  * Ventana de contexto activa: ~33,066 tokens (Caché: 30,015 | Input: 3,051).
+  * Consumo global de la conversación: 111,844,280 tokens procesados acumulados.
+  * Almacenamiento histórico de APKs: 70 compilaciones (456.10 MB en versions/).
+================================================================================
+
+- Consulta de contraste tarifario Gemini 3.8 Flash (04/11/2026 16:03):
+  * Verificación de tarifas oficiales vigentes de Gemini 3.8 Flash ($0.75/$0.075/$3.75 por 1M).
+  * Explicación del impacto del 95.9% de ratio de caché que permite procesar 49.9M tokens por solo $5.92 USD.
+================================================================================
+
+================================================================================
+INCIDENCIA CRÍTICA REPORTADA (05/11/2026 10:49):
+- Reporte usuario: Fallo al añadir la canción #22 tras 3 intentos (silencioso sin error) y desaparición de las 12 canciones más escuchadas en el 4º intento.
+- Diagnóstico técnico preliminar:
+  1. Bloqueo en handleFilesSelect por falta de reseteo en input.value (impide re-disparar evento change) y timeout síncrono de 5s en fetch('/api/songs').
+  2. Flag _libraryTableDirty no invalidado forzadamente, impidiendo refresco visual de la tabla.
+  3. Desaparición visual/datos de las 12 canciones del repertorio original por:
+     a) Posible activación de filtro 'Sin escuchar' (unplayed) que oculta temas con playCount > 0.
+     b) Clamping residual destructivo de playCount (Math.ceil(totalMins/4)).
+     c) Desincronización en IndexedDB entre canciones nativas y locales.
+- Plan de rescate y blindaje inmediato para v1.7.8 (Compilación #69).
+================================================================================
+
+
+================================================================================
+RESOLUCIÓN Y LANZAMIENTO OFICIAL v1.7.8 (05/11/2026):
+- Versión: 1.7.8 | Código de versión: 20 | Compilación: #69
+- Archivos generados:
+  * SpotiLocal.apk (Raíz del proyecto)
+  * SpotiLocal_v1.7.8.apk (Raíz del proyecto)
+  * versions/SpotiLocal_v1.7.8_recovery_engine.apk (Catálogo local #69)
+  * Tamaño: 7,470,856 bytes | SHA-256: 3E35241FB9D2C122FED2D43C38EAA23724CC9846ED9B3EF42EA94466D895C1E2
+- Correcciones implementadas y verificadas:
+  1. Motor de Auto-Recuperación de Biblioteca (CANONICAL_PRESET_SONGS & repairAndRecoverLibrary):
+     * Detección y reconstrucción automática al iniciar la app de las 12 canciones canónicas de SpotiLocal en caso de ausencia en memoria/IndexedDB.
+     * Re-vinculación transparente a los audioBlobs locales persistentes en 'song_blobs'.
+     * Recalculo y restauración de minutos reales y número de reproducciones cruzando registros históricos de 'spotilocal_listening_logs'.
+     * Botón explícito en Ajustes: 'Reparar y Restaurar Biblioteca 🛠️'.
+  2. Eliminación de la fórmula destructiva de playCount:
+     * Supresión definitiva de Math.ceil(totalMins / 4) en loadSongsFromDB (líneas ~1305 y ~1416 de app.js).
+  3. Blindaje del motor de subida de canciones locales (handleFilesSelect):
+     * Reseteo inmediato de input.value en selectores de archivo tras cada subida, permitiendo re-selecciones instantáneas.
+     * Eliminación de la llamada de red bloqueante (timeout reducido de 5s a 1.5s asíncrono).
+     * Inserción en memoria inmediata (0ms) con refresco forzado (_libraryTableDirty = true) y reseteo de filtro a 'all'.
+     * Notificación toast de confirmación visual: 'Añadiendo canción...' -> '¡Canción añadida con éxito! 🎵'.
+================================================================================
+
+
+================================================================================
+RESOLUCIÓN Y LANZAMIENTO OFICIAL v1.7.9 (05/11/2026):
+- Versión: 1.7.9 | Código de versión: 21 | Compilación: #70
+- Archivos generados:
+  * SpotiLocal.apk (Raíz del proyecto)
+  * SpotiLocal_v1.7.9.apk (Raíz del proyecto)
+  * versions/SpotiLocal_v1.7.9_forensic_rescue.apk (Catálogo local #70)
+  * Tamaño: 7,472,832 bytes | SHA-256: 3306FBAA7037B60C22ACEF3D9261AAE3EDC27662D868F49A5C98226DDBE5EE44
+- Correcciones y Sistema de Rescate Forense Profundo:
+  1. Escaneo Forense de 5 Vías para recuperación total de pistas piratas/locales:
+     * Vía A: Extracción masiva de blobs huérfanos desde el almacén 'song_blobs' en IndexedDB (getAllBlobRecords). Parseo de etiquetas ID3 incrustadas y nombres originales.
+     * Vía B: Rastreo de 'spotilocal_listening_logs' para recuperar identificadores de canciones perdidas y reconstruir su registro.
+     * Vía C: Rastreo del almacenamiento nativo en disco (NativeAudioStore.listFiles / listLocalAudioFiles).
+     * Vía D: Sincronización de 'spotilocal_cached_songs' de localStorage.
+     * Vía E: Verificación del catálogo canónico de 12 temas de repertorio.
+  2. Re-vinculación cruzada de estadísticas históricas:
+     * Minutos acumulados reales y conteo de reproducciones reasignados por ID o título normalizado.
+  3. Control manual en interfaz (Ajustes):
+     * Botón: '🔍 Escaneo Forense Profundo (Recuperar TODO)'.
+================================================================================
+
+
+================================================================================
+RESOLUCIÓN Y LANZAMIENTO OFICIAL v1.8.0 (05/11/2026):
+- Versión: 1.8.0 | Código de versión: 22 | Compilación: #71
+- Archivos generados:
+  * SpotiLocal.apk (Raíz del proyecto)
+  * SpotiLocal_v1.8.0.apk (Raíz del proyecto)
+  * versions/SpotiLocal_v1.8.0_metadata_and_deletion_shield.apk (Catálogo local #71)
+  * Tamaño: 7,475,904 bytes | SHA-256: 56B221B49BC84EB082A64994F4F0A651880FF393B1903144175EEF76EA4B31D0
+- Correcciones y Escudo de Metadatos y Borrado Definitivo:
+  1. Re-Enriquecimiento Automático de Metadatos y Carátulas (reEnrichSongMetadata):
+     * Detección y curación activa de temas dañados con títulos genéricos ("Canción Histórica", "Canción Recuperada", "Tema Local").
+     * Parseo directo de etiquetas ID3 (TIT2, TPE1, TALB) y carátulas incrustadas (APIC) desde los blobs de audio en 'song_blobs' con buffer expandido a 1MB y soporte nativo de Blobs sin propiedad .name.
+     * Vinculación inmediata con 'CANONICAL_PRESET_SONGS' y 'DEFAULT_COVER_CATALOG' para restablecer los títulos canónicos, artistas, álbumes y portadas en alta definición de las 12 canciones de repertorio.
+     * Invocación de 'hydrateCoverArt' para persistencia local de portadas.
+  2. Escudo Permanente de Borrado y Supresión de Resurrección Fantasma:
+     * Implementación de lista negra persistente ('spotilocal_deleted_song_ids' en localStorage y 'deleted_song_ids' en musicDB.settings).
+     * Funciones getDeletedSongIds, markSongAsDeleted, isSongDeleted y unmarkSongAsDeleted.
+     * Refactorización de deleteSong(id): marca permanente en lista negra, purga atómica de 'songs' y 'song_blobs' en IndexedDB, eliminación en memoria y actualización inmediata de 'spotilocal_cached_songs' sin re-ejecutar bucles de recuperación.
+     * Blindaje en repairAndRecoverLibrary y loadSongsFromDB: omisión estricta de cualquier pista marcada en lista negra a través de las 5 vías de rescate.
+  3. Desactivación de la Auto-Recuperación Intrusiva en Inicio:
+     * Supresión del disparador descontrolado (hasMissingPresets || songs.length < 22 || totalLogsCount > 0).
+     * La recuperación forense automática solo se dispara si la biblioteca está 100% vacía (songs.length === 0); si hay canciones, ejecuta reEnrichSongMetadata en segundo plano sin resucitar nada.
+================================================================================
+
+
+================================================================================
+RESOLUCIÓN Y LANZAMIENTO OFICIAL v1.8.1 (05/11/2026):
+- Versión: 1.8.1 | Código de versión: 23 | Compilación: #72
+- Archivos generados:
+  * SpotiLocal.apk (Raíz del proyecto)
+  * SpotiLocal_v1.8.1.apk (Raíz del proyecto)
+  * versions/SpotiLocal_v1.8.1_universal_metadata_healer.apk (Catálogo local #72)
+  * Tamaño: 7,478,664 bytes | SHA-256: 0EBC8E81B01185EEF585E9B28429581E5FE01545A57E86168C31EEFCDA07EC23
+- Diagnóstico de la Causa en v1.8.0 y Solución de Triple Vía Implementada:
+  1. Causa Raíz de la No-Restauración en v1.8.0:
+     * Detección Unicode estricta fallida: 'isGenericTitle' evaluaba 'Canción Histórica' de forma sensible a tildes y mayúsculas/minúsculas. Si el dispositivo almacenaba 'cancion historica' (sin tilde o minúsculas), la condición no se cumplía.
+     * Parser limitado: Si los archivos eran FLAC nativos ('fLaC'), ID3v1 o MP3 sin cabecera ID3v2, el parser devolvía 'Canción' y el enriquecedor lo descartaba.
+     * Ejecución asíncrona descolgada: 'reEnrichSongMetadata' se invocaba sin 'await' en segundo plano, por lo que la vista se renderizaba antes de que se completara.
+  2. Parser Universal de Audio Multiformato (id3-parser.js):
+     * Soporte nativo y extracción de metadatos Vorbis Comment (TITLE, ARTIST, ALBUM, YEAR, GENRE) y PICTURE block en archivos FLAC ('fLaC').
+     * Soporte de lectura de ID3v2 con buffer expandido dinámicamente hasta 8MB para portadas de alta resolución.
+     * Soporte de ID3v1 en los últimos 128 bytes del archivo para audios clásicos.
+  3. Matriz de Identificación por Tamaño de Archivo (CANONICAL_PRESET_BY_SIZE):
+     * Identificación matemática de las 12 canciones de repertorio comparando el tamaño exacto en bytes de los Blobs de audio almacenados en 'song_blobs' (ej. 10,245,164 bytes = Back in Black, 11,883,941 bytes = The Winner Takes It All).
+     * Mapeo y descarga forzada de carátulas desde 'DEFAULT_COVER_CATALOG' y 'getMappedCoverUrl'.
+  4. Sincronización Bloqueante al Inicio y Botón Manual en Ajustes:
+     * 'await reEnrichSongMetadata()' se ejecuta de forma síncrona en el arranque antes del pintado final.
+     * Nuevo botón en Ajustes: '✨ Restaurar Títulos y Carátulas' (reEnrichSongMetadataUI) con notificación toast explicativa del recuento de canciones sanadas.
+================================================================================
+
+================================================================================
+RESOLUCIÓN Y LANZAMIENTO OFICIAL v1.8.2 (05/11/2026):
+- Versión: 1.8.2 | Código de versión: 24 | Compilación: #73
+- Archivos generados:
+  * SpotiLocal.apk (Raíz del proyecto)
+  * SpotiLocal_v1.8.2.apk (Raíz del proyecto)
+  * versions/SpotiLocal_v1.8.2_cover_art_guarantee.apk (Catálogo local #73)
+  * Tamaño: 7,482,136 bytes | SHA-256: 2B80947B5C013B7D448359536D9D7B6CE3A086029055584C78671F4525B6998D
+- Diagnóstico Forense y Causa Raíz de Carátulas No Visibles en v1.8.1:
+  1. El Bug de Serialización '{}' en Blobs de Carátulas:
+     * Al guardar en localStorage (spotilocal_cached_songs), los objetos Blob se serializan como {} (objeto vacío).
+     * En JavaScript, {} es 'truthy', lo que hacía que !song.coverBlob evaluara a false.
+     * reEnrichSongMetadata creía que la canción ya tenía carátula asignada y saltaba el bloque de extracción de audio blobs.
+     * Al renderizar, song.coverBlob instanceof Blob evaluaba a false, mostrando la carátula genérica gris.
+     * Al pulsar el botón manual, enrichedCount era 0 y el toast reportaba falsamente: "Todas las canciones activas ya tienen sus datos asignados".
+  2. Omisión de la Bandera 'changed' en Mapeo de Carátulas:
+     * Cuando se asignaba song.coverUrl desde el catálogo de repertorio, no se marcaba changed = true, por lo que IndexedDB nunca persistía el cambio.
+- Solución Integral de Garantía de Carátulas en v1.8.2:
+  1. Saneamiento Profundo de Memoria y Caché:
+     * Tanto en loadSongsFromDB como en reEnrichSongMetadata, cualquier song.coverBlob que no sea instancia real de Blob o File se limpia a null.
+     * Las comprobaciones se blindan con !(song.coverBlob instanceof Blob) && !(song.coverBlob instanceof File).
+     * saveCachedSongs almacena únicamente coverUrl y omite serializar coverBlob a JSON.
+  2. Extracción Universal Robusta de Carátulas en 'id3-parser.js':
+     * Escaneo de firmas mágicas binarias para imágenes incrustadas: JPEG (FF D8 FF), PNG (89 50 4E 47), WebP (RIFF...WEBP) y GIF (GIF8), resolviendo cualquier discrepancia de alineamiento de bytes o cadenas MIME corruptas.
+     * Soporte de lectura de imágenes en MP3 (ID3v2.2 PIC, ID3v2.3/v2.4 APIC), FLAC (PICTURE block tipo 6) y contenedores M4A/MP4 (átomo 'covr').
+     * Límite de extracción ampliado a 32MB para portadas de ultra alta fidelidad.
+  3. Selector de Carátula de Galería y Buscador Online en Modal 'Editar Canción':
+     * Previsualización en tiempo real de la portada en el modal de edición (#edit-cover-preview).
+     * Botón 'Elegir de galería' (#btn-edit-pick-cover) para subir cualquier fotografía o imagen desde el almacenamiento local del teléfono.
+     * Botón 'Buscar carátula online' (#btn-edit-fetch-cover) conectado a la API de iTunes para descargar automáticamente carátulas de 600x600px con un solo toque.
+  4. Invalidación de Caché de ObjectURLs (coverObjectUrlCache):
+     * Borrado explícito de URLs cacheadas al actualizar portadas para refresco visual instantáneo en lista, barra de reproducción, reproductor expandido y letras.
+================================================================================
+
+ACTUALIZACIÓN CRÍTICA RE-EMPAQUETADA v1.8.2 (05/11/2026 - 13:58):
+- Versión: 1.8.2 | Código de versión: 24 | Compilación: #73 (Rehecha)
+- Archivos generados:
+  * SpotiLocal.apk (Raíz del proyecto)
+  * SpotiLocal_v1.8.2.apk (Raíz del proyecto)
+  * versions/SpotiLocal_v1.8.2_cover_art_guarantee.apk (Catálogo local #73)
+  * Tamaño: 7,483,616 bytes | SHA-256: D3BF99DDEACB9A7B9F9EDA244A1D84EA2ECDE671C3217D80E02C5D981FD2CD30
+- Diagnóstico Forense y Corrección de Restauración de TÍTULOS:
+  1. Causa Raíz de Títulos No Restaurados:
+     * En 'id3-parser.js', la cabecera mágica de ID3v1 comprobaba '0x37' ('7') en lugar de '0x47' ('G'), inutilizando completamente la lectura de tags ID3v1 al final de los archivos.
+     * En frames de texto con codificación UTF-16 con BOM (encoding 1), los audios en Big Endian se decodificaban como caracteres chinos corruptos.
+     * En 'ID3Parser.parse', si ID3v2 contenía carátula APIC pero no TIT2, retornaba inmediatamente sin fusionar el tag ID3v1, perdiendo el título.
+     * En 'app.js', si una canción recuperada de logs no tenía blob físico vinculado (por ser streaming de repertorio local), no se reasignaba el título canónico y quedaba bloqueada como "Canción Histórica (xxxxxx)".
+  2. Solución Definitiva de Restauración de Títulos:
+     * Corrección a '0x47' ('TAG') en parser ID3v1.
+     * Decodificador de texto multi-encoding nativo con TextDecoder para UTF-8, Latin1, UTF-16LE y UTF-16BE automático sin corrupción.
+     * Fusión inteligente ID3v2 + ID3v1: si v2 tiene carátula y v1 tiene título, se combinan ambos.
+     * Auto-Sanador de Repertorio Canónico: Cualquier canción que aún mantenga título genérico ("Canción Histórica...", "Tema Local...", etc.) se vincula automáticamente con los presets canónicos no asignados (The Winner Takes It All, Back in Black, etc.), restaurando título, artista, álbum, audioUrl y coverUrl.
+     * Vinculación profunda de blobs huérfanos: si una canción genérica carece de blob, se busca en 'blobRecords' cualquier audioBlob no vinculado para restaurar su metadata ID3.
+================================================================================
+
+ACTUALIZACIÓN CRÍTICA FORENSE v1.8.3 (05/11/2026 - 14:21):
+- Versión: 1.8.3 | Código de versión: 25 | Compilación: #74
+- Archivos generados:
+  * SpotiLocal.apk (Raíz del proyecto)
+  * SpotiLocal_v1.8.3.apk (Raíz del proyecto)
+  * versions/SpotiLocal_v1.8.3_native_recovery.apk (Catálogo local #74)
+  * Tamaño: 7,488,928 bytes | SHA-256: E9E0BA496A25176B8922884FF1F7A243170BB50F218A82B9101073C98F64C767
+- Diagnóstico Forense y Solución Definitiva de Recuperación:
+  1. Integración de Puente Nativo con NativeAudioStore:
+     * Descubrimiento: Las canciones recuperadas desde los logs de reproducción carecían de blob en IndexedDB ('song_blobs'), por lo que el parser ID3 nunca recibía datos que analizar.
+     * Implementación en 'NativeAudioStore.java' y 'NativePlayerBridge.java':
+       - 'findAudioFile(context, mediaId)': Localiza el archivo de audio real en 'files/native-audio/' por SHA-256(song.id) independientemente de la extensión.
+       - 'readRange(file, offset, length)' y 'readRangeBase64': Lectura segura por tramos de hasta 2MB mediante RandomAccessFile.
+       - '@JavascriptInterface getLocalAudioInfo(mediaId)': Informa de presencia física, nombre y tamaño del audio nativo.
+       - '@JavascriptInterface readLocalAudioRange(mediaId, offset, length)': Transfiere los bytes del audio al WebView en Base64.
+  2. Motor de Reconstrucción de Blobs y Extracción ID3 ('app.js'):
+     * Nueva función 'getBlobFromAnySource(song)': Escaneo en cascada de memoria -> IndexedDB ('musicDB.getAudioBlob') -> almacenamiento nativo Android ('readLocalAudioRange').
+     * Persistencia bidireccional: Al recuperar el audio de 'native-audio', se reconstruye el Blob y se persiste de vuelta en IndexedDB ('song_blobs') garantizando permanencia offline.
+     * Extracción determinista de metadatos:
+       - Identificación canónica por tamaño exacto ('CANONICAL_PRESET_BY_SIZE').
+       - Parser multinivel ID3v2/FLAC/M4A/ID3v1 sobre el blob nativo con extracción de título, artista, álbum y portada 'coverBlob'.
+  3. Eliminación Total de Adivinación (Block F eliminado):
+     * Eliminado por completo el auto-sanador por orden de array que asignaba títulos de canciones canónicas a temas subidos por el usuario.
+     * Las pistas que carecen de archivo se marcan con 'needsReview: true' y la insignia visible "Sin identificar" en la tabla, con acceso directo al modal de edición y búsqueda de carátulas en iTunes.
+  4. Panel de Diagnóstico Forense en Ajustes:
+     * Botón '🔍 Diagnóstico de biblioteca' en Ajustes que genera un informe completo (canción por canción, presencia de blob en IndexedDB, presencia de archivo en 'native-audio', tamaño en bytes, estado de carátula y huérfanos).
+     * Botón de copiado en un toque al portapapeles.
+  5. Invalidación de Caché PWA / WebView:
+     * 'sw.js': Incremento de CACHE_NAME a 'spotipirata-pwa-v161' con estrategia Network-First para navegación HTML ('index.html').
+     * 'index.html': Script tags actualizados con version query string '?v=1.8.3'.
+================================================================================
+
+VERIFICACIÓN EXITOSA DE USUARIO (05/11/2026 - 14:23):
+- El usuario confirma en su dispositivo físico que la recuperación de títulos y carátulas funciona correctamente con SpotiLocal v1.8.3 (Build #74).
+- Las canciones recuperadas han restaurado sus nombres reales y carátulas originales desde el almacenamiento nativo hacia IndexedDB.
+================================================================================
+
+ACTUALIZACIÓN CRÍTICA FORENSE v1.8.4 (07/11/2026 - 19:55):
+- Versión: 1.8.4 | Código de versión: 26 | Compilación: #75
+- Archivos generados:
+  * SpotiLocal.apk (Raíz del proyecto)
+  * SpotiLocal_v1.8.4.apk (Raíz del proyecto)
+  * versions/SpotiLocal_v1.8.4_stats_trim_gain30db.apk (Catálogo local #75)
+  * Tamaño: 7,499,840 bytes | SHA-256: C2757C477B5B6B611CAB16D8C0EF5069AE35908B99B3DB6885AD5DE65E154C61
+- Diagnóstico Forense y Solución Integral:
+  1. Blindaje y Recuperación Definitiva de Estadísticas de Escucha:
+     * Causa Raíz: El tope FIFO de 10.000 micro-registros (de 3-5s) truncaba el historial a ~13,9 horas (50.000s), y 'globalTotalSeconds' en IndexedDB jamás era consultado por 'getStatsIndex()'. Además, borrar temas restaba tiempo del Total Histórico y 'restoreListeningLogsFromDB()' se ejecutaba sin 'await'.
+     * Solución:
+       - Implementado algoritmo 'coalesceListeningLogs' que fusiona ticks continuos de la misma canción en ventanas de hasta 15 min y bloques de 1 hora, elevando la retención a 25.000 bloques (~6.250+ horas reales) y archivando excedentes en 'spotilocal_archived_secs'.
+       - 'getStatsIndex()' reconcilia alias de IDs antiguos ('folder_...'), suma de playlists, contadores de canciones y 'globalTotalSeconds' persistente.
+       - En 'deleteSong', los acumulados históricos y anuales se bloquean en 'settings' antes de eliminar la pista, garantizando que borrar canciones nunca decrezca el tiempo total.
+       - Añadida tarjeta en Ajustes "📊 Registro de Horas y Estadísticas" con auditoría en vivo y control opcional para fijar un suelo histórico en horas ('applyHistoricalHoursFloorUI').
+  2. Reparación e Integración del Sistema de Recortes ("Recortes") con v1.8.x:
+     * Causa Raíz: La columna de acciones (.col-actions) en escritorio estaba limitada a 80px para 7 botones (~240px), recortando el botón '✂️'. ExoPlayer devolvía la longitud recortada en 'durationMs', corrompiendo 'song.duration', rompiendo '📍 Aquí' y bloqueando la preescucha. 'btnAutoDetectSilence' truncaba a 10MB y 'saveCachedSongs' descartaba recortes en 6 puntos.
+     * Solución:
+       - Grid de escritorio ampliado a 236px y acciones móviles optimizadas con '✂️' siempre visible.
+       - Separación estricta de 'rawDuration' inmutable (obtenida por 'MediaMetadataRetriever' en 2ms o Audio probe sobre 'getBlobFromAnySource') frente a la duración visual recortada.
+       - 'getPlaybackCurrentTime()' calcula posición absoluta 'clipStartMs + positionMs', haciendo que '📍 Aquí' y las letras '.lrc' sincronicen con precisión milimétrica.
+       - Preescucha sin recorte ('previewSongAtUnclippedTime') para probar cualquier punto de la onda o inicio/fin fuera del clip previo, con playhead vivo '#trim-playhead' en tiempo real.
+       - 'btnAutoDetectSilence' escanea archivos completos de hasta 45MB sin truncado artificial de 10MB.
+       - 'saveCachedSongs' unificado en los 6 puntos de guardado preservando recortes, ganancias y duración.
+  3. Ampliación de Ganancia de Sonido por Canción a ±30 dB (Nivelador):
+     * Tarjeta de Nivelador de Sonido desacoplada de '#trim-controls-container', permitiendo nivelar volumen aunque el recorte de tiempo esté desactivado.
+     * Rango ampliado de -30 dB a +30 dB con slider continuo y botones rápidos de precisión (-1 dB, 0 dB, +1 dB).
+     * En Android Native: Integrado 'android.media.audiofx.LoudnessEnhancer' para boost real de hasta +3000 mB (+30 dB) y atenuación lineal para valores negativos (≤0 dB), auto-aplicado por canción al cambiar de pista en segundo plano.
+     * En Web/PWA: Integrado limitador transparente 'DynamicsCompressorNode' (-1.0 dB ceiling) y 'GainNode' hasta 32.0x (+30 dB).
+     * Respuesta en tiempo real instantánea mientras se arrastra el deslizador en reproducción activa.
+  4. Invalidación de Caché y Empaquetado:
+     * 'sw.js' CACHE_NAME incrementado a 'spotipirata-pwa-v162'.
+     * Paridad SHA-256 byte a byte verificada al 100% entre raíz y assets del APK nativo.
+================================================================================

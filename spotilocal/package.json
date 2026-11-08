@@ -1,0 +1,13 @@
+{
+  "name": "spotilocal-music-player",
+  "version": "1.0.0",
+  "description": "Aplicación de música local offline estilo Spotify para móvil y PC",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["music", "spotify", "pwa", "apk", "offline", "equalizer", "audio"],
+  "author": "Antigravity",
+  "license": "MIT"
+}

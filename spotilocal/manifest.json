@@ -1,0 +1,46 @@
+{
+  "id": "/",
+  "name": "Spoti Pirata",
+  "short_name": "Spoti Pirata",
+  "description": "Reproductor de música local offline y de alta fidelidad para smartphone y ordenador",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#121212",
+  "orientation": "portrait-primary",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["music", "entertainment", "audio"],
+  "shortcuts": [
+    {
+      "name": "Biblioteca",
+      "url": "./index.html#library",
+      "description": "Ver biblioteca musical"
+    },
+    {
+      "name": "Listas",
+      "url": "./index.html#playlists",
+      "description": "Ver listas de reproducción"
+    }
+  ]
+}

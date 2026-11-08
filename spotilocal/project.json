@@ -1,0 +1,7 @@
+{
+  "title": "SpotiLocal - Reproductor de Música Nativo PWA/APK",
+  "description": "Aplicación de música local offline para móvil y PC con interfaz estilo Spotify, ecualizador de 5 bandas, almacenamiento IndexedDB, metadatos ID3, visualizador de audio, letras sincronizadas e integración con la pantalla de bloqueo.",
+  "file": "index.html",
+  "type": "web",
+  "visibility": "public"
+}

@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>SpotiLocal Pro v1.8.4 - Tu Música Sin Límites</title>
+  <meta name="description" content="Reproductor de música local offline para móvil y PC con ecualizador, letras y diseño estilo Spotify.">
+  <meta name="theme-color" content="#121212">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Spoti Pirata">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+
+  <!-- Google Fonts: Inter & Outfit (Non-blocking asynchronous load) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap" media="print" onload="this.media='all'">
+  
+  <!-- FontAwesome Icons (Non-blocking asynchronous load) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" media="print" onload="this.media='all'">
+  
+  <link rel="stylesheet" href="styles.css?v=1.8.4">
+</head>
+<body>
+  <!-- Ambient Dynamic Glow Backdrop -->
+  <div id="ambient-glow" class="ambient-glow"></div>
+
+
+
+  <!-- App Wrapper -->
+  <div id="app" class="app-container">
+    
+    <!-- Sidebar Navigation (Desktop) -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <i class="fa-solid fa-circle-play logo-icon"></i>
+        <span class="brand-name">Spoti Pirata</span>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-tab="home" onclick="window.switchTab('home')">
+          <i class="fa-solid fa-house"></i> <span>Inicio</span>
+        </button>
+        <button class="nav-item" data-tab="library" onclick="window.switchTab('library')">
+          <i class="fa-solid fa-book-bookmark"></i> <span>Biblioteca</span>
+        </button>
+        <button class="nav-item" data-tab="lyrics" onclick="window.switchTab('lyrics')">
+          <i class="fa-solid fa-quote-right"></i> <span>Letras</span>
+        </button>
+        <button class="nav-item" data-tab="ranking" onclick="window.switchTab('ranking')">
+          <i class="fa-solid fa-trophy"></i> <span>Ranking</span>
+        </button>
+        <button class="nav-item" data-tab="settings" onclick="window.switchTab('settings')">
+          <i class="fa-solid fa-gear"></i> <span>Ajustes</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-upload">
+        <label for="audio-file-input" class="upload-btn">
+          <i class="fa-solid fa-cloud-arrow-up"></i>
+          <span>Subir Música</span>
+        </label>
+        <input type="file" id="audio-file-input" multiple accept="audio/*,*/*" hidden>
+      </div>
+
+      <div class="sidebar-playlists">
+        <div class="playlist-header">
+          <span>TUS PLAYLISTS</span>
+          <button id="btn-create-playlist" title="Crear Lista"><i class="fa-solid fa-plus"></i></button>
+        </div>
+        <ul id="sidebar-playlist-list" class="playlist-list">
+          <!-- Populated by JS -->
+        </ul>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      
+      <!-- Top Header Bar -->
+      <header class="top-header">
+        <div class="search-bar-container">
+          <i class="fa-solid fa-magnifying-glass search-icon"></i>
+          <input type="text" id="global-search-input" placeholder="¿Qué quieres escuchar hoy?" autocomplete="off">
+        </div>
+        <div class="top-actions">
+          <button id="btn-install-pwa-header" class="primary-btn" style="background:var(--spotify-green); color:#000; font-size:12px; font-weight:700; padding:6px 12px; border-radius:20px; gap:6px; display:inline-flex; align-items:center;">
+            <i class="fa-solid fa-download"></i> <span>Instalar App 📱</span>
+          </button>
+          <label for="mobile-audio-input" class="mobile-upload-btn" title="Subir canción">
+            <i class="fa-solid fa-plus"></i>
+          </label>
+          <input type="file" id="mobile-audio-input" accept="audio/*,.mp3,.wav,.flac,.m4a,.ogg,.aac" multiple hidden>
+        </div>
+      </header>
+
+      <!-- View Containers -->
+      <div class="views-wrapper">
+        
+        <!-- HOME VIEW -->
+        <section id="view-home" class="tab-view active">
+
+          <!-- Time Listened Statistics Grid (Today, Month, Year, Other Years) -->
+          <div class="stats-banner" style="margin-top: 10px;">
+            <div class="stats-header">
+              <i class="fa-solid fa-clock-rotate-left"></i>
+              <h2>Minutos Escuchados</h2>
+            </div>
+            <div class="stats-grid">
+              <div class="stat-card">
+                <span class="stat-number" id="stat-time-today">0 min</span>
+                <span class="stat-label">Hoy</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-number" id="stat-time-month">0 min</span>
+                <span class="stat-label">Este Mes</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-number" id="stat-time-year">0 min</span>
+                <span class="stat-label">Este Año</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-number" id="stat-time-history">0 min</span>
+                <span class="stat-label">Total Histórico</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Escuchado Recientemente -->
+          <div class="section-container">
+            <h2 class="section-title">Escuchado Recientemente 🎧</h2>
+            <div id="recent-grid" class="cards-grid">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+
+          <!-- Equalizer Section at bottom of Home -->
+          <div class="section-container" style="margin-top: 30px;">
+            <div class="eq-container">
+              <div class="eq-header">
+                <h2><i class="fa-solid fa-sliders" style="color:#1db954;"></i> Ecualizador de Sonido & Visualizador</h2>
+                <p>Personaliza las frecuencias para tus auriculares o altavoces.</p>
+              </div>
+
+              <!-- Canvas Spectrum Visualizer -->
+              <div class="visualizer-wrapper">
+                <canvas id="visualizer-canvas"></canvas>
+                <div class="visualizer-controls">
+                  <button class="viz-btn active" data-mode="bars">Barras Neón</button>
+                  <button class="viz-btn" data-mode="wave">Onda Fluida</button>
+                  <button class="viz-btn" data-mode="circle">Espectro Circular</button>
+                </div>
+              </div>
+
+              <!-- EQ Presets -->
+              <div class="presets-bar">
+                <span class="preset-label">Preajustes:</span>
+                <button class="preset-chip active" data-preset="flat">Plano</button>
+                <button class="preset-chip" data-preset="bassBoost">Bass Boost 🔊</button>
+                <button class="preset-chip" data-preset="pop">Pop</button>
+                <button class="preset-chip" data-preset="rock">Rock</button>
+                <button class="preset-chip" data-preset="jazz">Jazz</button>
+                <button class="preset-chip" data-preset="vocal">Vocal Boost</button>
+              </div>
+
+              <!-- 5 Band Sliders -->
+              <div class="sliders-grid">
+                <div class="slider-group">
+                  <span class="eq-value" id="eq-val-0">0 dB</span>
+                   <input type="range" class="eq-slider" data-band="0" min="-24" max="24" value="0" step="0.5">
+                  <span class="freq-label">60 Hz<br><small>Bajos Profundos</small></span>
+                </div>
+                <div class="slider-group">
+                  <span class="eq-value" id="eq-val-1">0 dB</span>
+                   <input type="range" class="eq-slider" data-band="1" min="-24" max="24" value="0" step="0.5">
+                  <span class="freq-label">230 Hz<br><small>Bajos</small></span>
+                </div>
+                <div class="slider-group">
+                  <span class="eq-value" id="eq-val-2">0 dB</span>
+                   <input type="range" class="eq-slider" data-band="2" min="-24" max="24" value="0" step="0.5">
+                  <span class="freq-label">910 Hz<br><small>Medios</small></span>
+                </div>
+                <div class="slider-group">
+                  <span class="eq-value" id="eq-val-3">0 dB</span>
+                   <input type="range" class="eq-slider" data-band="3" min="-24" max="24" value="0" step="0.5">
+                  <span class="freq-label">3.6 kHz<br><small>Vocales</small></span>
+                </div>
+                <div class="slider-group">
+                  <span class="eq-value" id="eq-val-4">0 dB</span>
+                   <input type="range" class="eq-slider" data-band="4" min="-24" max="24" value="0" step="0.5">
+                  <span class="freq-label">14 kHz<br><small>Agudos</small></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- LIBRARY VIEW -->
+        <section id="view-library" class="tab-view">
+          <div id="library-main-content">
+            <!-- Top Section: Playlists -->
+            <div class="section-container" style="margin-bottom: 24px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px;">
+                <h2 style="font-size:20px; font-weight:800; color:white; margin:0;"><i class="fa-solid fa-list" style="color:#1db954;"></i> Listas de Reproducción</h2>
+                <button id="btn-create-playlist-lib" class="primary-btn" style="padding: 8px 14px; font-size:13px; background:var(--spotify-green); color:black; font-weight:700;">
+                  <i class="fa-solid fa-plus"></i> Crear Lista
+                </button>
+              </div>
+              <div id="library-playlists-grid" class="cards-grid">
+                <!-- Populated by JS -->
+              </div>
+            </div>
+
+            <!-- Bottom Section: Songs with Filters and Sorting -->
+            <div class="section-container">
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom: 14px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <h2 style="font-size:20px; font-weight:800; color:white; margin:0;"><i class="fa-solid fa-music" style="color:var(--spotify-green);"></i> Canciones</h2>
+                  <span id="library-songs-count" style="font-size:12px; color:var(--spotify-grey); font-weight:600;">(0 temas)</span>
+                </div>
+                
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <button id="btn-shuffle-library" class="primary-btn" style="padding:6px 14px; font-size:12px; border-radius:20px; background:var(--spotify-green); color:#000; font-weight:800; display:inline-flex; align-items:center; gap:6px;">
+                    <i class="fa-solid fa-shuffle"></i> Aleatorio
+                  </button>
+                  <select id="library-sort-select" class="custom-select" style="padding:6px 12px; font-size:12px; border-radius:20px;">
+                    <option value="recent10d">🔥 Más escuchadas (10 días)</option>
+                    <option value="dateAdded">🕒 Añadidas recientemente</option>
+                    <option value="titleAsc">🔤 Título (A - Z)</option>
+                    <option value="artistAsc">🎤 Artista (A - Z)</option>
+                    <option value="albumAsc">💿 Álbum (A - Z)</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Filter Chips -->
+              <div class="library-filters" style="display:flex; gap:8px; margin-bottom:14px; overflow-x:auto; padding-bottom:4px;">
+                <button class="filter-chip active" data-lib-filter="all">Todos</button>
+                <button class="filter-chip" data-lib-filter="liked"><i class="fa-solid fa-heart" style="color:#1db954;"></i> Favoritos</button>
+                <button class="filter-chip" data-lib-filter="top10d"><i class="fa-solid fa-fire" style="color:#ff9800;"></i> Top 10 Días</button>
+                <button class="filter-chip" data-lib-filter="unplayed">Sin escuchar</button>
+              </div>
+
+              <div id="songs-list-container" class="songs-list-container">
+                <div class="table-header">
+                  <span class="col-num">#</span>
+                  <span class="col-title">Título</span>
+                  <span class="col-album">Álbum</span>
+                  <span class="col-date">Escuchado 10D</span>
+                  <span class="col-actions">Acciones</span>
+                </div>
+                <div id="songs-table-body" class="songs-table-body">
+                  <!-- Song rows -->
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Playlist Detail Container (Shown when viewing a specific playlist) -->
+          <div id="playlist-detail-container" class="playlist-detail-container hidden">
+            <div class="playlist-detail-header-card">
+              <button id="btn-back-to-library" class="secondary-btn" style="margin-bottom:14px; padding:6px 14px; font-size:12px; border-radius:20px;">
+                <i class="fa-solid fa-arrow-left"></i> Volver a Listas
+              </button>
+              <div class="playlist-hero-info">
+                <div class="playlist-hero-icon">
+                  <i class="fa-solid fa-music"></i>
+                </div>
+                <div class="playlist-hero-text">
+                  <span class="playlist-badge-label">LISTA DE REPRODUCCIÓN</span>
+                  <h1 id="playlist-detail-title" class="playlist-title-display">Mi Lista</h1>
+                  <p id="playlist-detail-meta" class="playlist-meta-display">0 temas • 0 min</p>
+                </div>
+              </div>
+              <div class="playlist-hero-actions">
+                <button id="btn-play-all-playlist" class="primary-btn play-all-btn">
+                  <i class="fa-solid fa-play"></i> Reproducir Lista
+                </button>
+                <button id="btn-delete-playlist-current" class="danger-btn delete-pl-btn">
+                  <i class="fa-solid fa-trash-can"></i> Eliminar Lista
+                </button>
+              </div>
+            </div>
+
+            <div class="section-container" style="margin-top:20px;">
+              <h3 style="font-size:16px; font-weight:700; color:white; margin-bottom:12px;">Temas en esta lista</h3>
+              <div id="playlist-songs-container" class="songs-list-container">
+                <div class="table-header">
+                  <span class="col-num">#</span>
+                  <span class="col-title">Título</span>
+                  <span class="col-album">Álbum</span>
+                  <span class="col-date">Duración</span>
+                  <span class="col-actions">Quitar</span>
+                </div>
+                <div id="playlist-songs-table-body" class="songs-table-body">
+                  <!-- Populated by JS -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- LYRICS VIEW -->
+        <section id="view-lyrics" class="tab-view">
+          <div class="lyrics-container">
+            <div class="lyrics-header">
+              <div class="now-playing-mini">
+                <img id="lyrics-cover" src="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23333'><rect width='24' height='24'/></svg>" alt="Cover">
+                <div>
+                  <h3 id="lyrics-title">Ninguna canción en reproducción</h3>
+                  <p id="lyrics-artist">Selecciona un tema para ver sus letras</p>
+                </div>
+              </div>
+              <label for="lrc-file-input" class="lrc-upload-btn" title="Cargar archivo .LRC">
+                <i class="fa-solid fa-file-circle-plus"></i> <span>Importar .LRC</span>
+              </label>
+              <input type="file" id="lrc-file-input" accept=".lrc,.txt" hidden>
+            </div>
+
+            <div id="lyrics-scroll-box" class="lyrics-scroll-box">
+              <div class="lyrics-empty">
+                <i class="fa-solid fa-quote-right" style="font-size:48px; color:var(--spotify-green); margin-bottom:16px;"></i>
+                <h3 style="color:white; font-weight:700; margin-bottom:8px;">Letras de Canciones</h3>
+                <p>Las letras sincronizadas aparecerán aquí durante la reproducción.</p>
+                <small style="color:var(--spotify-grey);">Puedes importar un archivo <code>.lrc</code> o vincularlo más adelante.</small>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- RANKING VIEW -->
+        <section id="view-ranking" class="tab-view">
+          <div class="section-container">
+            <div class="ranking-header-title" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom: 20px;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <i class="fa-solid fa-trophy" style="color: #f1c40f; font-size: 24px;"></i>
+                <h2 class="section-title" style="margin:0; font-size:22px;">Ranking de Canciones</h2>
+              </div>
+
+              <!-- Timeframe Filter Chips -->
+              <div class="ranking-filters" style="display:flex; gap:8px;">
+                <button class="filter-chip active" data-ranking-filter="weekly">Semanal</button>
+                <button class="filter-chip" data-ranking-filter="monthly">Mensual</button>
+                <button class="filter-chip" data-ranking-filter="yearly">Anual</button>
+                <button class="filter-chip" data-ranking-filter="historical">Histórico</button>
+              </div>
+            </div>
+
+            <div class="songs-list-container">
+              <div class="table-header ranking-table-header">
+                <span class="col-num">Puesto</span>
+                <span class="col-title">Canción</span>
+                <span class="col-plays">Reproducciones</span>
+                <span class="col-time">Tiempo Escuchado</span>
+              </div>
+              <div id="top-ranking-body" class="songs-table-body">
+                <!-- Ranking rows populated by JS -->
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SETTINGS VIEW -->
+        <section id="view-settings" class="tab-view">
+          <div class="settings-container">
+            <h2>Ajustes & Herramientas</h2>
+            
+            <!-- PWA Installation Card -->
+            <div class="settings-card" id="pwa-install-card" style="border: 1px solid var(--spotify-green); background: linear-gradient(135deg, rgba(29, 185, 84, 0.12), rgba(18, 18, 18, 0.9));">
+              <div class="setting-item" style="flex-wrap:wrap; gap:12px;">
+                <div style="flex:1;">
+                  <h3 style="color:var(--spotify-green); display:flex; align-items:center; gap:8px;">
+                    <i class="fa-solid fa-mobile-screen-button"></i> Instalar Aplicación PWA
+                  </h3>
+                  <p>Instala SpotiLocal en tu pantalla de inicio como una aplicación nativa completa, con reproducción en segundo plano sin límites y soporte offline.</p>
+                </div>
+                <button id="btn-install-pwa" class="primary-btn" style="background: var(--spotify-green); color: black; font-weight:800; padding:10px 18px;">
+                  <i class="fa-solid fa-download"></i> Instalar App 📱
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-card" style="border: 1px solid var(--glass-border); background: rgba(255, 255, 255, 0.03);">
+              <div class="setting-item" style="flex-wrap:wrap; gap:12px;">
+                <div style="flex:1;">
+                  <h3 style="color:white; display:flex; align-items:center; gap:8px;">
+                    <i class="fa-solid fa-arrows-rotate" style="color:var(--spotify-green);"></i> Actualizaciones de la Aplicación
+                  </h3>
+                  <p>Comprueba si hay una nueva versión del reproductor en tu servidor local e instálala en 1 segundo.</p>
+                </div>
+                <button id="btn-check-update" class="primary-btn" style="background: var(--spotify-green); color: black; font-weight:800;" onclick="window.checkForUpdates(true)">
+                  <i class="fa-solid fa-rotate"></i> Buscar Actualizaciones 🚀
+                </button>
+              </div>
+              <div id="update-status-lbl" style="font-size:12px; font-weight:700; color:var(--spotify-grey); margin-top:8px;"></div>
+              <div id="pwa-update-action-container" style="margin-top: 12px; display: none;">
+                <button id="btn-apply-pwa-update" class="primary-btn full" style="background: linear-gradient(135deg, #1db954, #1ed760); color: black; font-weight: 800; font-size: 14px; padding: 12px;" onclick="window.applyPwaUpdate()">
+                  <i class="fa-solid fa-bolt"></i> Actualizar Ahora a la Nueva Versión ⚡
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <div class="setting-item" style="flex-direction: column; align-items: flex-start; gap: 10px;">
+                <div>
+                  <h3>Dirección IP de tu PC en la Red Wi-Fi</h3>
+                  <p>Si la dirección IP de tu PC cambia en tu Wi-Fi, puedes guardarla aquí al instante:</p>
+                </div>
+                <div style="display: flex; gap: 8px; width: 100%; max-width: 400px; margin-top: 4px;">
+                  <input type="text" id="custom-ip-input" value="192.168.1.63" style="flex: 1; padding: 10px 14px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; color: white; font-weight: 700; font-family: monospace;">
+                  <button id="btn-save-ip" class="primary-btn" style="padding: 10px 16px; background: var(--spotify-green); color: black; font-weight: 800; white-space: nowrap;" onclick="window.saveServerIp()">Guardar IP 💾</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <div class="setting-item">
+                <div>
+                  <h3>Sincronización de Música Local</h3>
+                  <p>Descarga la música alojada en la carpeta songs de tu PC.</p>
+                </div>
+                <button id="btn-force-sync" class="primary-btn" style="background: linear-gradient(135deg, #27ae60, #2ecc71); color: white;" onclick="window.forceSyncMusic()">
+                  <i class="fa-solid fa-rotate"></i> Sincronizar Música 🔄
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <div class="setting-item">
+                <div>
+                  <h3>Transición Suave (Crossfade)</h3>
+                  <p>Fundido encadenado de volumen entre canciones para evitar silencios abruptos.</p>
+                </div>
+                <select id="crossfade-select" class="custom-select">
+                  <option value="0">Desactivado</option>
+                  <option value="2">2 Segundos</option>
+                  <option value="4" selected>4 Segundos</option>
+                  <option value="6">6 Segundos</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <div class="setting-item">
+                <div>
+                  <h3>Temporizador de Apagado (Sleep Timer)</h3>
+                  <p>La música se pausará automáticamente transcurrido el tiempo seleccionado.</p>
+                </div>
+                <select id="sleep-timer-select" class="custom-select">
+                  <option value="off">Desactivado</option>
+                  <option value="15">15 Minutos</option>
+                  <option value="30">30 Minutos</option>
+                  <option value="45">45 Minutos</option>
+                  <option value="60">1 Hora</option>
+                </select>
+              </div>
+              <div id="sleep-timer-status" class="timer-badge hidden">
+                <i class="fa-solid fa-clock"></i> <span id="timer-countdown">30:00</span> restantes
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <div class="setting-item">
+                <div>
+                  <h3>Diagnóstico de Audio del Móvil</h3>
+                  <p>Comprueba si los altavoces de tu smartphone emiten sonido inmediatamente.</p>
+                </div>
+                <button class="primary-btn" onclick="window.testMobileSpeaker()" style="background:#1db954; color:black; font-weight:700; padding:10px 16px;">
+                  <i class="fa-solid fa-volume-high"></i> Probar Altavoz del Móvil
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <i class="fa-solid fa-network-wired" style="color:#3498db; font-size: 24px; margin-right: 12px;"></i>
+              <div style="flex:1;">
+                <h4 style="margin-bottom:4px; font-weight:700;">Conexión con tu Ordenador PC</h4>
+                <p style="font-size:12px; color:var(--spotify-grey); margin-bottom:8px;">Introduce la Dirección IP local de tu ordenador en tu red Wi-Fi:</p>
+                <div style="display:flex; gap:8px; align-items:center;">
+                  <input type="text" id="pc-ip-input" value="192.168.1.63" class="modal-input" style="flex:1; margin:0;" placeholder="192.168.1.63">
+                  <button id="btn-save-pc-ip" class="primary-btn" style="padding: 8px 16px; white-space:nowrap;">Guardar IP</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-card" style="border: 1px solid rgba(29, 185, 84, 0.35); background: rgba(29, 185, 84, 0.05);">
+              <div class="setting-item" style="flex-direction: column; align-items: flex-start; gap: 10px;">
+                <div style="width: 100%;">
+                  <h3 style="display:flex; align-items:center; gap:8px; color:white;">
+                    <i class="fa-solid fa-shield-halved" style="color:var(--spotify-green);"></i> Inmunidad Estadística por Canción
+                  </h3>
+                  <p style="margin-bottom:8px; font-size:12px; color:var(--spotify-grey);">
+                    Vacuna arquitectónica activa: Ledger permanente e independiente en base de datos. Las estadísticas de cada tema son matemáticamente monótonas e infranqueables ante escaneos, limpiezas de caché o reparaciones.
+                  </p>
+                  <div id="stats-audit-summary" style="font-size:12px; font-family:monospace; background:rgba(0,0,0,0.45); border:1px solid rgba(255,255,255,0.1); border-radius:8px; padding:10px 12px; color:#e2e8f0; line-height:1.6;">
+                    Cargando auditoría de estadísticas...
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <div class="setting-item">
+                <div>
+                  <h3>Gestión de la Biblioteca</h3>
+                  <p>Espacio utilizado y opciones de copia de seguridad.</p>
+                </div>
+                <div class="btn-group" style="display:flex; flex-wrap:wrap; gap:8px;">
+                  <button id="btn-reenrich-meta" class="primary-btn" onclick="window.reEnrichSongMetadataUI()" style="background:#3b82f6; color:#fff; font-weight:700; padding:8px 14px; border-radius:20px; font-size:12px;">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> ✨ Restaurar Títulos y Carátulas
+                  </button>
+                  <button id="btn-diagnostic" class="secondary-btn" onclick="window.openDiagnosticUI()" style="border:1px solid #38bdf8; color:#38bdf8; font-weight:700; padding:8px 14px; border-radius:20px; font-size:12px;">
+                    <i class="fa-solid fa-microscope"></i> 🔍 Diagnóstico de biblioteca
+                  </button>
+                  <button id="btn-repair-db" class="primary-btn" onclick="window.repairAndRecoverLibraryUI()" style="background:var(--spotify-green); color:#000; font-weight:700; padding:8px 14px; border-radius:20px; font-size:12px;">
+                    <i class="fa-solid fa-magnifying-glass-chart"></i> 🔍 Escaneo Forense Profundo (Recuperar TODO)
+                  </button>
+                  <button id="btn-export-db" class="secondary-btn" onclick="window.exportDatabase()">
+                    <i class="fa-solid fa-file-export"></i> Exportar Datos
+                  </button>
+                  <button id="btn-clear-db" class="danger-btn" onclick="window.clearDatabase()">
+                    <i class="fa-solid fa-trash-can"></i> Borrar Todo
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-card info-card">
+              <i class="fa-solid fa-circle-info"></i>
+              <div>
+                <h4 id="app-version-label">SpotiLocal Pro v1.8.4</h4>
+                <p id="app-build-label" style="font-size:12px; color:var(--spotify-grey); margin-bottom:4px;">Versión 1.8.4 · Build #75 (Estadísticas Blindadas, Recortes &amp; Ganancia ±30dB)</p>
+                <p>Desarrollado para reproducción offline de alta calidad en tu smartphone. Almacenamiento seguro en tu navegador vía IndexedDB.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+
+    <!-- Bottom Player Bar (Floating Spotify Bar) -->
+    <div id="player-bar" class="player-bar">
+      <div class="player-left" id="player-left-click">
+        <img id="player-cover" class="player-cover" src="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23282828'><rect width='24' height='24'/></svg>" alt="Cover">
+        <div class="player-meta">
+          <span id="player-title" class="song-title">Sin reproducción</span>
+          <span id="player-artist" class="song-artist">Selecciona una canción</span>
+        </div>
+        <button id="player-like-btn" class="icon-btn like-btn" title="Favorito"><i class="fa-regular fa-heart"></i></button>
+      </div>
+
+      <div class="player-center">
+        <div class="player-controls">
+          <button id="btn-shuffle" class="icon-btn" title="Aleatorio"><i class="fa-solid fa-shuffle"></i></button>
+          <button id="btn-prev" class="icon-btn" title="Anterior"><i class="fa-solid fa-backward-step"></i></button>
+          <button id="btn-play-pause" class="play-btn" title="Reproducir"><i class="fa-solid fa-play"></i></button>
+          <button id="btn-next" class="icon-btn" title="Siguiente"><i class="fa-solid fa-forward-step"></i></button>
+          <button id="btn-repeat" class="icon-btn" title="Repetir"><i class="fa-solid fa-repeat"></i></button>
+        </div>
+
+        <div class="playback-bar">
+          <span id="time-current" class="time-label">0:00</span>
+          <div class="progress-bar-container" id="progress-container" style="height:10px; min-height:10px; flex:0 0 10px; border-radius:5px; border:1px solid rgba(148,163,184,0.65); background:linear-gradient(to right,#2f80ed 0%,#2f80ed var(--progress,0%),transparent var(--progress,0%),transparent 100%);">
+            <div id="progress-fill" class="progress-fill" style="height:100%; border-radius:5px; background-color:#2f80ed;"></div>
+            <input id="progress-slider" class="progress-seek-slider" type="range" min="0" max="1" step="0.001" value="0" aria-label="Progreso de reproducción">
+          </div>
+          <span id="time-total" class="time-label">0:00</span>
+        </div>
+      </div>
+
+      <div class="player-right">
+        <button id="btn-open-queue" class="icon-btn" title="Cola de reproducción"><i class="fa-solid fa-list-ul"></i></button>
+        <div class="volume-container">
+          <button id="btn-mute" class="icon-btn"><i class="fa-solid fa-volume-high"></i></button>
+          <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="0.8">
+        </div>
+        <button id="btn-expand-player" class="icon-btn" title="Expandir"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></button>
+      </div>
+    </div>
+
+    <!-- Mobile Bottom Navigation Bar -->
+    <nav class="mobile-bottom-nav">
+      <button type="button" class="mobile-nav-item active" data-tab="home" onclick="window.switchTab('home')">
+        <i class="fa-solid fa-house" onclick="window.switchTab('home')"></i>
+        <span onclick="window.switchTab('home')">Inicio</span>
+      </button>
+      <button type="button" class="mobile-nav-item" data-tab="library" onclick="window.switchTab('library')">
+        <i class="fa-solid fa-book-bookmark" onclick="window.switchTab('library')"></i>
+        <span onclick="window.switchTab('library')">Biblioteca</span>
+      </button>
+      <button type="button" class="mobile-nav-item" data-tab="lyrics" onclick="window.switchTab('lyrics')">
+        <i class="fa-solid fa-quote-right" onclick="window.switchTab('lyrics')"></i>
+        <span onclick="window.switchTab('lyrics')">Letras</span>
+      </button>
+      <button type="button" class="mobile-nav-item" data-tab="ranking" onclick="window.switchTab('ranking')">
+        <i class="fa-solid fa-trophy" onclick="window.switchTab('ranking')"></i>
+        <span onclick="window.switchTab('ranking')">Ranking</span>
+      </button>
+      <button type="button" class="mobile-nav-item" data-tab="settings" onclick="window.switchTab('settings')">
+        <i class="fa-solid fa-gear" onclick="window.switchTab('settings')"></i>
+        <span onclick="window.switchTab('settings')">Ajustes</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Fullscreen Expanded Player Modal (Mobile & Desktop Fullview) -->
+  <div id="expanded-player-modal" class="expanded-modal hidden">
+    <div class="expanded-header">
+      <button id="btn-close-expanded" class="icon-btn"><i class="fa-solid fa-chevron-down"></i></button>
+      <span>REPRODUCIENDO DESDE TU BIBLIOTECA</span>
+      <button id="btn-expanded-options" class="icon-btn"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+    </div>
+
+    <div class="expanded-body">
+      <!-- Vinyl / Cover Disc -->
+      <div class="cover-wrapper">
+        <img id="expanded-cover" src="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23282828'><rect width='24' height='24'/></svg>" alt="Expanded Cover">
+      </div>
+
+      <div class="expanded-info">
+        <div>
+          <h2 id="expanded-title">Sin reproducción</h2>
+          <p id="expanded-artist">Selecciona una canción</p>
+        </div>
+        <button id="expanded-like-btn" class="icon-btn like-btn"><i class="fa-regular fa-heart"></i></button>
+      </div>
+
+      <!-- Extended Progress Bar -->
+      <div class="expanded-progress">
+          <div class="progress-bar-container" id="expanded-progress-container" style="height:10px; min-height:10px; flex:0 0 10px; border-radius:5px; border:1px solid rgba(148,163,184,0.65); background:linear-gradient(to right,#2f80ed 0%,#2f80ed var(--progress,0%),transparent var(--progress,0%),transparent 100%);">
+            <div id="expanded-progress-fill" class="progress-fill" style="height:100%; border-radius:5px; background-color:#2f80ed;"></div>
+            <input id="expanded-progress-slider" class="progress-seek-slider" type="range" min="0" max="1" step="0.001" value="0" aria-label="Progreso de reproducción">
+          </div>
+        <div class="time-labels">
+          <span id="expanded-time-current">0:00</span>
+          <span id="expanded-time-total">0:00</span>
+        </div>
+      </div>
+
+      <!-- Main Expanded Controls -->
+      <div class="expanded-controls">
+        <button id="exp-btn-shuffle" class="icon-btn"><i class="fa-solid fa-shuffle"></i></button>
+        <button id="exp-btn-prev" class="icon-btn lg"><i class="fa-solid fa-backward-step"></i></button>
+        <button id="exp-btn-play-pause" class="play-btn xl"><i class="fa-solid fa-play"></i></button>
+        <button id="exp-btn-next" class="icon-btn lg"><i class="fa-solid fa-forward-step"></i></button>
+        <button id="exp-btn-repeat" class="icon-btn"><i class="fa-solid fa-repeat"></i></button>
+      </div>
+
+      <!-- Extra Tools Footer -->
+      <div class="expanded-tools">
+        <select id="speed-select" class="speed-select" title="Velocidad">
+          <option value="0.5">0.5x</option>
+          <option value="0.75">0.75x</option>
+          <option value="1.0" selected>1.0x (Normal)</option>
+          <option value="1.25">1.25x</option>
+          <option value="1.5">1.5x</option>
+          <option value="2.0">2.0x</option>
+        </select>
+        <button id="btn-open-queue-expanded" class="tool-btn"><i class="fa-solid fa-list-ul"></i> Cola</button>
+        <button id="btn-show-lyrics-modal" class="tool-btn"><i class="fa-solid fa-quote-right"></i> Letras</button>
+        <button id="btn-open-trim-expanded" class="tool-btn"><i class="fa-solid fa-scissors"></i> Recortar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Queue Modal -->
+  <div id="queue-modal" class="modal-backdrop hidden">
+    <div class="modal-card queue-panel">
+      <div class="modal-header">
+        <div>
+          <span class="queue-kicker">REPRODUCCIÓN</span>
+          <h3>Cola de reproducción</h3>
+          <span id="queue-count" class="queue-count">0 pendientes</span>
+        </div>
+        <div class="queue-header-actions">
+          <button id="btn-clear-queue" class="icon-btn" title="Vaciar pendientes"><i class="fa-solid fa-trash-can"></i></button>
+          <button id="btn-close-queue" class="icon-btn" title="Cerrar"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="queue-section-title"><i class="fa-solid fa-music"></i> Ahora y después</div>
+        <div id="queue-songs-list" class="queue-list queue-list-modern">
+          <!-- Queue items -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Playlist Modal -->
+  <div id="playlist-modal" class="modal-backdrop hidden">
+    <div class="modal-card mini">
+      <div class="modal-header">
+        <h3>Crear Nueva Lista</h3>
+        <button id="btn-close-playlist-modal" class="icon-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="playlist-name-input" placeholder="Nombre de la lista (ej: Mi Mix 2026)" class="modal-input">
+        <button id="btn-save-playlist" class="primary-btn full">Guardar Lista</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Song to Playlist Modal -->
+  <div id="add-to-playlist-modal" class="modal-backdrop hidden">
+    <div class="modal-card mini">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-folder-plus" style="color:var(--spotify-green);"></i> Añadir a Lista</h3>
+        <button id="btn-close-add-playlist-modal" class="icon-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <p id="add-playlist-song-title" style="font-size:13px; color:var(--spotify-grey); margin-bottom:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></p>
+        <div id="playlist-selection-list" class="playlist-choice-list" style="max-height:200px; overflow-y:auto; display:flex; flex-direction:column; gap:8px; margin-bottom:14px;">
+          <!-- Dynamic playlist list -->
+        </div>
+        <div style="border-top:1px solid var(--glass-border); padding-top:12px;">
+          <label style="font-size:12px; color:var(--spotify-grey); display:block; margin-bottom:6px;">O crea una nueva lista:</label>
+          <div style="display:flex; gap:8px;">
+            <input type="text" id="new-playlist-quick-input" placeholder="Nombre de lista..." class="modal-input" style="margin:0; flex:1;">
+            <button id="btn-create-and-add-playlist" class="primary-btn" style="white-space:nowrap; padding:8px 14px; background:var(--spotify-green); color:black; font-weight:700;">Crear y Añadir</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Song Metadata Modal -->
+  <div id="edit-meta-modal" class="modal-backdrop hidden">
+    <div class="modal-card mini">
+      <div class="modal-header">
+        <h3>Editar Canción</h3>
+        <button id="btn-close-edit-modal" class="icon-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <!-- Cover Art Customization & Preview -->
+        <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px; background:rgba(255,255,255,0.04); padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.08);">
+          <img id="edit-cover-preview" src="" alt="Carátula" style="width:68px; height:68px; border-radius:8px; object-fit:cover; background:#282828; flex-shrink:0; box-shadow:0 4px 12px rgba(0,0,0,0.5);">
+          <div style="display:flex; flex-direction:column; gap:6px; flex:1;">
+            <button id="btn-edit-pick-cover" type="button" class="mini-btn" style="background:#282828; color:#fff; border:1px solid #444; border-radius:12px; padding:6px 10px; font-size:11px; cursor:pointer; text-align:left; display:flex; align-items:center; gap:6px;">
+              <i class="fa-solid fa-image" style="color:var(--spotify-green);"></i> Elegir de galería
+            </button>
+            <button id="btn-edit-fetch-cover" type="button" class="mini-btn" style="background:rgba(29,185,84,0.12); border:1px solid rgba(29,185,84,0.35); color:var(--spotify-green); border-radius:12px; padding:6px 10px; font-size:11px; cursor:pointer; text-align:left; display:flex; align-items:center; gap:6px;">
+              <i class="fa-solid fa-globe"></i> Buscar carátula online
+            </button>
+            <input type="file" id="edit-cover-file-input" accept="image/*" style="display:none;">
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <label style="font-size:12px;color:var(--spotify-grey);">Título:</label>
+          <button id="btn-sanitize-meta-title" type="button" class="mini-btn" style="background:rgba(29,185,84,0.15); border:1px solid rgba(29,185,84,0.4); color:var(--spotify-green); padding:2px 8px; border-radius:10px; font-size:11px; cursor:pointer;" title="Eliminar (Official Video), [HD], etc.">
+            <i class="fa-solid fa-broom"></i> Limpiar Título YouTube
+          </button>
+        </div>
+        <input type="text" id="edit-title-input" class="modal-input">
+        <label style="font-size:12px;color:var(--spotify-grey);">Artista:</label>
+        <input type="text" id="edit-artist-input" class="modal-input">
+        <label style="font-size:12px;color:var(--spotify-grey);">Álbum:</label>
+        <input type="text" id="edit-album-input" class="modal-input">
+        <button id="btn-save-edit-meta" class="primary-btn full">Guardar Cambios</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Trim & Audio Tweaks Modal -->
+  <div id="trim-song-modal" class="modal-backdrop hidden">
+    <div class="modal-card mini" style="max-width: 440px; width: 92%;">
+      <div class="modal-header">
+        <h3 style="display:flex; align-items:center; gap:8px;">
+          <i class="fa-solid fa-scissors" style="color:var(--spotify-green);"></i> Recortar Canción
+        </h3>
+        <button id="btn-close-trim-modal" class="icon-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body" style="gap:14px; display:flex; flex-direction:column;">
+        <div style="font-size:13px; color:var(--spotify-grey); line-height:1.4;">
+          <b id="trim-modal-song-title" style="color:white; display:block; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></b>
+          <span id="trim-modal-song-artist"></span>
+        </div>
+
+        <!-- On/Off Switch -->
+        <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.06); padding:10px 14px; border-radius:10px; border:1px solid rgba(255,255,255,0.08);">
+          <div style="display:flex; align-items:center; gap:9px;">
+            <i class="fa-solid fa-power-off" id="icon-trim-toggle" style="color:var(--spotify-green); font-size:15px;"></i>
+            <div>
+              <span id="lbl-trim-toggle-status" style="font-size:13px; font-weight:700; color:white; display:block;">Recorte Activado</span>
+              <span id="lbl-trim-toggle-sub" style="font-size:11px; color:var(--spotify-grey);">Se aplicarán los cortes de inicio y fin</span>
+            </div>
+          </div>
+          <label class="custom-switch">
+            <input type="checkbox" id="toggle-trim-enabled" checked>
+            <span class="custom-switch-slider"></span>
+          </label>
+        </div>
+
+        <div id="trim-controls-container" style="display:flex; flex-direction:column; gap:14px; transition: opacity 0.25s ease;">
+          <!-- Waveform / Mini Seekbar with Trim Range -->
+          <div class="trim-visual-container" id="trim-visual-track">
+          <canvas id="trim-waveform-canvas" width="400" height="48"></canvas>
+          <div id="trim-dim-left" style="position:absolute; top:0; left:0; bottom:0; background:rgba(0,0,0,0.65); pointer-events:none; width:0%;"></div>
+          <div id="trim-active-region" style="position:absolute; top:0; bottom:0; background:rgba(29,185,84,0.18); border-left:3px solid var(--spotify-green); border-right:3px solid #ff4d4d; pointer-events:none; left:0%; width:100%;"></div>
+          <div id="trim-dim-right" style="position:absolute; top:0; right:0; bottom:0; background:rgba(0,0,0,0.65); pointer-events:none; width:0%;"></div>
+          <div id="trim-playhead" style="position:absolute; top:0; bottom:0; width:2px; background:#fff; box-shadow:0 0 6px white; pointer-events:none; left:0%;"></div>
+        </div>
+
+        <!-- Time indicators -->
+        <div style="display:flex; justify-content:space-between; font-size:12px; font-family:monospace; color:var(--spotify-grey);">
+          <span>Inicio: <b id="lbl-trim-start" style="color:var(--spotify-green);">00:00.0</b></span>
+          <span>Duración útil: <b id="lbl-trim-duration" style="color:white;">00:00</b></span>
+          <span>Fin: <b id="lbl-trim-end" style="color:#ff6b6b;">00:00.0</b></span>
+        </div>
+
+        <!-- Dual Sliders -->
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          <div>
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-bottom:4px;">
+              <span style="color:var(--spotify-green); font-weight:600;"><i class="fa-solid fa-play"></i> Punto de Inicio:</span>
+              <div style="display:flex; gap:4px;">
+                <button id="btn-trim-start-minus" type="button" class="mini-btn">-0.5s</button>
+                <button id="btn-trim-start-plus" type="button" class="mini-btn">+0.5s</button>
+                <button id="btn-set-trim-start-here" type="button" class="mini-btn primary" title="Fijar en posición actual">📍 Aquí</button>
+              </div>
+            </div>
+            <input type="range" id="slider-trim-start" min="0" max="600" step="0.1" value="0" style="width:100%; accent-color:var(--spotify-green);">
+          </div>
+
+          <div>
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-bottom:4px;">
+              <span style="color:#ff6b6b; font-weight:600;"><i class="fa-solid fa-stop"></i> Punto de Fin:</span>
+              <div style="display:flex; gap:4px;">
+                <button id="btn-trim-end-minus" type="button" class="mini-btn">-0.5s</button>
+                <button id="btn-trim-end-plus" type="button" class="mini-btn">+0.5s</button>
+                <button id="btn-set-trim-end-here" type="button" class="mini-btn primary" title="Fijar en posición actual">📍 Aquí</button>
+              </div>
+            </div>
+            <input type="range" id="slider-trim-end" min="0" max="600" step="0.1" value="600" style="width:100%; accent-color:#ff6b6b;">
+          </div>
+        </div>
+
+        <!-- Quick Previews -->
+        <div style="display:flex; gap:8px;">
+          <button id="btn-preview-start" type="button" class="tool-btn" style="flex:1; padding:8px; font-size:12px; background:rgba(255,255,255,0.08); border-radius:6px; justify-content:center;">
+            <i class="fa-solid fa-play"></i> Probar Inicio (4s)
+          </button>
+          <button id="btn-preview-end" type="button" class="tool-btn" style="flex:1; padding:8px; font-size:12px; background:rgba(255,255,255,0.08); border-radius:6px; justify-content:center;">
+            <i class="fa-solid fa-forward-step"></i> Probar Fin (4s)
+          </button>
+        </div>
+
+        <!-- Smart Tool: Auto-Detect Silences -->
+        <div style="background:rgba(255,255,255,0.04); border-radius:8px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center; border:1px solid rgba(255,255,255,0.06);">
+          <span style="font-size:12px; font-weight:600;"><i class="fa-solid fa-wand-magic-sparkles" style="color:#e91e63;"></i> Auto-Detección:</span>
+          <button id="btn-auto-detect-silence" type="button" class="mini-btn" style="background:#e91e63; color:white; border:none; padding:5px 12px; border-radius:12px; cursor:pointer;">
+            ⚡ Detectar Silencios
+          </button>
+        </div>
+        </div>
+
+        <!-- Independent Per-Song Sound Gain Leveler (-30 dB to +30 dB) -->
+        <div style="background:rgba(255,255,255,0.05); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:6px; border:1px solid rgba(255,255,255,0.09);">
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px;">
+            <span style="font-weight:600;"><i class="fa-solid fa-volume-high" style="color:var(--spotify-green);"></i> Nivelador de Sonido (±30 dB):</span>
+            <span id="lbl-trim-gain" style="font-weight:700; color:var(--spotify-green);">0 dB (Normal)</span>
+          </div>
+          <input type="range" id="slider-trim-gain" min="-30" max="30" step="0.5" value="0" style="width:100%; accent-color:var(--spotify-green);">
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; color:var(--spotify-grey); margin-top:2px;">
+            <span>-30 dB</span>
+            <div style="display:flex; gap:6px;">
+              <button id="btn-gain-minus" type="button" class="mini-btn">-1 dB</button>
+              <button id="btn-gain-zero" type="button" class="mini-btn">0 dB</button>
+              <button id="btn-gain-plus" type="button" class="mini-btn">+1 dB</button>
+            </div>
+            <span>+30 dB</span>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div style="display:flex; gap:8px; margin-top:4px;">
+          <button id="btn-reset-trim" type="button" class="tool-btn" style="flex:1; padding:10px; border-radius:8px; background:rgba(255,255,255,0.08); color:var(--spotify-grey); justify-content:center;">
+            Restablecer
+          </button>
+          <button id="btn-save-trim" type="button" class="primary-btn" style="flex:2; padding:10px; font-weight:700;">
+            Guardar Recorte
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Diagnostic Modal -->
+  <div id="diagnostic-modal" class="modal-backdrop hidden">
+    <div class="modal-card" style="max-width:680px; max-height:85vh; display:flex; flex-direction:column;">
+      <div class="modal-header">
+        <h3 style="display:flex; align-items:center; gap:8px;">
+          <i class="fa-solid fa-microscope" style="color:#38bdf8;"></i> Diagnóstico Forense de Biblioteca
+        </h3>
+        <button id="btn-close-diagnostic-modal" class="icon-btn" onclick="document.getElementById('diagnostic-modal').classList.add('hidden')">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body" style="overflow-y:auto; flex:1; font-size:12px; font-family:monospace;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:8px;">
+          <span id="diagnostic-status" style="color:var(--spotify-green);">Listo</span>
+          <div style="display:flex; gap:8px;">
+            <button id="btn-copy-diagnostic" class="mini-btn" onclick="window.copyDiagnosticReport()" style="background:#282828; color:#fff; border:1px solid #555; padding:6px 12px; border-radius:12px; cursor:pointer;">
+              <i class="fa-solid fa-copy"></i> Copiar Informe
+            </button>
+            <button id="btn-refresh-diagnostic" class="mini-btn" onclick="window.openDiagnosticUI()" style="background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8; padding:6px 12px; border-radius:12px; cursor:pointer;">
+              <i class="fa-solid fa-rotate"></i> Actualizar
+            </button>
+          </div>
+        </div>
+        <pre id="diagnostic-report-text" style="white-space:pre-wrap; word-break:break-all; background:#121212; padding:12px; border-radius:8px; border:1px solid #333; color:#e0e0e0; min-height:220px; max-height:55vh; overflow-y:auto; line-height:1.4;">Cargando diagnóstico forense...</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- PWA Install Guide Modal -->
+  <div id="pwa-install-guide-modal" class="modal-backdrop hidden">
+    <div class="modal-card mini" style="max-width:380px;">
+      <div class="modal-header">
+        <h3 style="display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-mobile-screen-button" style="color:var(--spotify-green);"></i> Instalar SpotiLocal Pro</h3>
+        <button id="btn-close-pwa-guide" class="icon-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body" style="text-align:left; font-size:13px; color:var(--spotify-white); line-height:1.5;">
+        <div style="background:rgba(29,185,84,0.1); border:1px solid rgba(29,185,84,0.3); border-radius:10px; padding:12px; margin-bottom:14px;">
+          <strong style="color:var(--spotify-green); display:block; margin-bottom:4px;">📱 Cómo instalar en tu móvil:</strong>
+          <p style="margin:0; font-size:12px; color:var(--spotify-grey);">Se instalará como una aplicación nativa a pantalla completa con icono propio en tu menú.</p>
+        </div>
+        
+        <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:16px;">
+          <div style="display:flex; gap:10px; align-items:flex-start;">
+            <span style="background:var(--spotify-green); color:black; font-weight:800; border-radius:50%; width:22px; height:22px; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:12px;">1</span>
+            <span>Toca el icono de los <strong>3 puntos ⋮</strong> de Google Chrome (arriba a la derecha en la barra de navegación).</span>
+          </div>
+          <div style="display:flex; gap:10px; align-items:flex-start;">
+            <span style="background:var(--spotify-green); color:black; font-weight:800; border-radius:50%; width:22px; height:22px; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:12px;">2</span>
+            <span>Selecciona <strong>"Instalar aplicación"</strong> o <strong>"Añadir a la pantalla de inicio"</strong>.</span>
+          </div>
+          <div style="display:flex; gap:10px; align-items:flex-start;">
+            <span style="background:var(--spotify-green); color:black; font-weight:800; border-radius:50%; width:22px; height:22px; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:12px;">3</span>
+            <span>Pulsa <strong>"Instalar"</strong> y ¡listo! Ya la tienes en tu pantalla de inicio.</span>
+          </div>
+        </div>
+
+        <button id="btn-pwa-guide-ok" class="primary-btn full" style="background:var(--spotify-green); color:black; font-weight:800;">¡Entendido! 👍</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audio Element (Direct HTML5 Media Element) -->
+  <audio id="main-audio-element" preload="auto"></audio>
+
+  <!-- JS Dependencies -->
+  <script src="id3-parser.js?v=1.8.4"></script>
+  <script src="db.js?v=1.8.4"></script>
+  <script src="audio-engine.js?v=1.8.4"></script>
+  <script src="app.js?v=1.8.4"></script>
+
+  <!-- Service Worker Registration for Web/PWA only (strictly blocked on Native Android APK) -->
+  <script>
+    const isNativeApp = Boolean(
+      window.Capacitor ||
+      window.location.protocol.startsWith('capacitor') ||
+      window.location.protocol === 'file:' ||
+      (window.location.hostname === 'localhost' && window.location.port !== '3000') ||
+      (window.location.hostname === '127.0.0.1' && window.location.port !== '3000') ||
+      navigator.userAgent.includes('wv') ||
+      (typeof window.SpotiLocalNativePlayer !== 'undefined')
+    );
+    if (!isNativeApp && 'serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js?v=162').catch(() => {});
+      });
+    } else if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(registrations => {
+        registrations.forEach(registration => registration.unregister());
+      });
+      if ('caches' in window) {
+        caches.keys().then(keys => keys.forEach(key => caches.delete(key)));
+      }
+    }
+  </script>
+</body>
+</html>

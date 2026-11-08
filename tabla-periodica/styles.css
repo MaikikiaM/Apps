@@ -1,0 +1,655 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+:root {
+  --bg-color: #000000;
+  --font-main: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Roboto', 'Helvetica Neue', sans-serif;
+  --glow-mult: 1;
+  --glow-color-mult: 0.25;
+}
+
+html, body {
+  width: 100vw;
+  height: 100vh;
+  background-color: #000000;
+  color: #ffffff;
+  font-family: var(--font-main);
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+.bg-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, #050811 0%, #000000 100%);
+}
+
+/* Wallpaper Container: Symmetrical by default, with dynamic offset support */
+.wallpaper-container {
+  position: relative;
+  z-index: 1;
+  width: 100vw;
+  height: 100vh;
+  padding: 1.8vh 2.5vw 1.8vh 2.5vw;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  background: transparent;
+  box-sizing: border-box;
+  transition: padding 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Icon Offset Variants for Desktop Icons */
+.wallpaper-container.offset-small {
+  padding: 1.8vh 2vw 1.8vh 6.5vw;
+}
+
+.wallpaper-container.offset-large {
+  padding: 1.8vh 2vw 1.8vh 11vw;
+}
+
+/* Discreet Control Button */
+.top-controls {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 100;
+  display: flex;
+  gap: 6px;
+  opacity: 0.15;
+  transition: opacity 0.25s ease;
+}
+
+.top-controls:hover {
+  opacity: 0.9;
+}
+
+.ctrl-btn {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #cfd8dc;
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: all 0.2s ease;
+}
+
+.ctrl-btn:hover {
+  color: #ffffff;
+  border-color: #64b5f6;
+  background: rgba(30, 41, 59, 0.9);
+  box-shadow: 0 0 10px rgba(100, 181, 246, 0.4);
+}
+
+/* Main Grid (18 Cols x 7 Rows) */
+.main-grid {
+  display: grid;
+  grid-template-columns: repeat(18, 1fr);
+  grid-template-rows: repeat(7, 1fr);
+  gap: clamp(2px, 0.32vw, 5px);
+  width: 100%;
+  height: 67.5vh;
+  position: relative;
+}
+
+/* Connector Area & SVG Lines */
+.connector-area {
+  width: 100%;
+  height: 2.2vh;
+  position: relative;
+  pointer-events: none;
+}
+
+.svg-connectors {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* Bottom F-Block Grid (18 Cols x 2 Rows) */
+.fblock-grid {
+  display: grid;
+  grid-template-columns: repeat(18, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  gap: clamp(2px, 0.32vw, 5px);
+  width: 100%;
+  height: 20vh;
+  position: relative;
+}
+
+/* Legend Row inside Top Empty Space (Row 1, Cols 3-17) */
+.table-legend {
+  grid-column: 3 / 18;
+  grid-row: 1 / 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-evenly;
+  padding: 0 0.5vw;
+  z-index: 5;
+  transition: opacity 0.3s ease;
+}
+
+.table-legend.hidden {
+  display: none;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  font-size: clamp(9px, 1.18vh, 13.5px);
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0.85;
+  padding: 3px 6px;
+  border-radius: 4px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.legend-item:hover {
+  opacity: 1;
+  transform: translateY(-1.5px);
+  filter: drop-shadow(0 0 8px currentColor);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Element Card (OLED pure black, crisp borders and responsive typography) */
+.element-card {
+  position: relative;
+  background: #000000;
+  border: 1px solid var(--cat-color);
+  border-radius: 3px;
+  padding: 3px 2px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transform-origin: center center;
+  will-change: transform, box-shadow;
+  box-shadow: 0 0 calc(6px * var(--glow-mult)) rgba(var(--cat-rgb, 100, 181, 246), var(--glow-color-mult));
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), 
+              box-shadow 0.2s ease, 
+              opacity 0.2s ease, 
+              background-color 0.2s ease, 
+              border-color 0.2s ease, 
+              z-index 0.01s;
+  z-index: 1;
+}
+
+.element-card:hover {
+  transform: scale(1.24) translateY(-3px);
+  z-index: 200;
+  background: #080e18;
+  border-color: #ffffff;
+  border-width: 1.5px;
+  box-shadow: 0 0 16px var(--cat-color), 0 0 32px var(--cat-color), inset 0 0 10px rgba(255, 255, 255, 0.15);
+}
+
+.atomic-num {
+  align-self: flex-start;
+  font-size: clamp(8.5px, 1.05vh, 12px);
+  font-weight: 600;
+  color: #78909c;
+  line-height: 1;
+  padding-left: 2px;
+}
+
+.symbol {
+  font-size: clamp(15px, 3.4vh, 28px);
+  font-weight: 600;
+  color: var(--cat-color);
+  line-height: 1;
+  margin: -1px 0 0 0;
+  letter-spacing: -0.4px;
+  text-shadow: 0 0 calc(4px * var(--glow-mult)) var(--cat-color), 0 0 calc(10px * var(--glow-mult)) var(--cat-color);
+}
+
+.name {
+  font-size: clamp(8px, 1.08vh, 12px);
+  font-weight: 500;
+  color: #cfd8dc;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 95%;
+  line-height: 1.1;
+  letter-spacing: -0.1px;
+}
+
+.mass {
+  font-size: clamp(7.5px, 0.9vh, 10.5px);
+  font-weight: 400;
+  color: #607d8b;
+  text-align: center;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+/* Glow Intensity Themes */
+body.glow-low {
+  --glow-mult: 0.4;
+  --glow-color-mult: 0.1;
+}
+
+body.glow-medium {
+  --glow-mult: 1.0;
+  --glow-color-mult: 0.25;
+}
+
+body.glow-high {
+  --glow-mult: 1.8;
+  --glow-color-mult: 0.45;
+}
+
+/* Placeholder for 57-71 and 89-103 */
+.placeholder-card {
+  background: #000000;
+  border: 1px solid var(--cat-color);
+  border-radius: 3px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: clamp(10px, 1.5vh, 15px);
+  font-weight: 600;
+  color: var(--cat-color);
+  text-shadow: 0 0 5px var(--cat-color);
+  box-shadow: 0 0 calc(5px * var(--glow-mult)) rgba(var(--cat-rgb, 100, 181, 246), var(--glow-color-mult));
+}
+
+/* Atom Orbit Modal Overlay */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-overlay.active {
+  opacity: 1;
+  pointer-events: all;
+}
+
+/* Morphing Container */
+.modal-container {
+  position: fixed;
+  background: #000000;
+  border: 1.5px solid var(--modal-color, #29b6f6);
+  border-radius: 4px;
+  box-shadow: 0 0 25px var(--modal-color, #29b6f6);
+  z-index: 1001;
+  overflow: hidden;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  will-change: left, top, width, height, border-radius, box-shadow;
+  transition: left 0.45s cubic-bezier(0.16, 1, 0.3, 1), 
+              top 0.45s cubic-bezier(0.16, 1, 0.3, 1), 
+              width 0.45s cubic-bezier(0.16, 1, 0.3, 1), 
+              height 0.45s cubic-bezier(0.16, 1, 0.3, 1), 
+              border-radius 0.45s ease,
+              box-shadow 0.45s ease;
+}
+
+.modal-container.expanded {
+  background: #060911;
+  border-width: 2px;
+  box-shadow: 0 0 45px var(--modal-color, #29b6f6), inset 0 0 20px rgba(0, 0, 0, 0.8);
+}
+
+/* Mini Card Overlay (Visible while expanding/shrinking) */
+.modal-mini-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  background: #000000;
+  border-radius: 3px;
+  opacity: 1;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 2;
+}
+
+.modal-container.expanded .modal-mini-card {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.close-btn {
+  position: absolute;
+  top: 0.8rem;
+  right: 0.8rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.2s ease, background 0.2s ease, transform 0.2s ease;
+  z-index: 30;
+}
+
+.modal-container.expanded .close-btn {
+  opacity: 1;
+}
+
+.close-btn:hover {
+  background: rgba(239, 83, 80, 0.9);
+  border-color: #ef5350;
+  transform: rotate(90deg);
+}
+
+/* Left Main Square Content */
+.modal-square-content {
+  flex-shrink: 0;
+  width: 45vh;
+  height: 45vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 1.1rem;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.modal-container.expanded .modal-square-content {
+  opacity: 1;
+  transition: opacity 0.3s ease 0.1s;
+}
+
+.details-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  padding-bottom: 0.5rem;
+  padding-right: 2.2rem;
+}
+
+.header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 0.8rem;
+}
+
+.modal-symbol {
+  font-size: 2.6rem;
+  font-weight: 600;
+  color: var(--modal-color, #29b6f6);
+  line-height: 1;
+  text-shadow: 0 0 10px var(--modal-color, #29b6f6);
+}
+
+.modal-title-group h2 {
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: #ffffff;
+  line-height: 1.15;
+}
+
+.modal-title-group p {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.75);
+  font-family: 'Consolas', monospace;
+}
+
+/* Bohr Orbit Canvas & Nucleus Target */
+.atom-stage-square {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0.4rem 0;
+}
+
+.atom-canvas {
+  width: 100%;
+  height: 100%;
+  max-width: 280px;
+  max-height: 280px;
+  object-fit: contain;
+}
+
+/* Clickable Target on the Atom Nucleus */
+.nucleus-target {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 15;
+  transition: transform 0.2s ease;
+}
+
+.nucleus-target:hover {
+  transform: translate(-50%, -50%) scale(1.3);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.nucleus-pulse-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 1.5px dashed var(--modal-color, #29b6f6);
+  opacity: 0.5;
+  animation: pulseRing 3s infinite ease-in-out;
+}
+
+@keyframes pulseRing {
+  0% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.2; }
+  50% { transform: translate(-50%, -50%) scale(1.25); opacity: 0.7; }
+  100% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.2; }
+}
+
+.details-footer-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  padding-top: 0.5rem;
+}
+
+.info-card-small {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.4rem 0.3rem;
+  border-radius: 5px;
+  text-align: center;
+}
+
+.info-card-small label {
+  font-size: 0.6rem;
+  color: rgba(255, 255, 255, 0.6);
+  display: block;
+  margin-bottom: 0.1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.info-card-small value {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+/* Right Side Fun Fact Panel */
+.side-fact-panel {
+  flex-shrink: 0;
+  width: 0;
+  height: 45vh;
+  opacity: 0;
+  overflow: hidden;
+  background: transparent;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  box-sizing: border-box;
+  transition: width 0.45s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s ease, padding 0.35s ease;
+}
+
+.modal-container.side-open .side-fact-panel {
+  width: 45vh;
+  opacity: 1;
+  padding: 0.6rem 0.6rem 0.6rem 0;
+}
+
+.fact-card-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #080d1a;
+  border: 1.5px solid var(--modal-color, #29b6f6);
+  border-radius: 8px;
+  padding: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 1rem;
+  box-shadow: inset 0 0 25px rgba(0, 0, 0, 0.7);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.fact-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  padding-bottom: 0.6rem;
+  position: relative;
+  z-index: 2;
+}
+
+.fact-badge {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--modal-color, #29b6f6);
+  letter-spacing: 1px;
+  text-shadow: 0 0 6px var(--modal-color, #29b6f6);
+}
+
+.fact-watermark {
+  position: absolute;
+  right: -0.2rem;
+  top: 1.5rem;
+  font-size: 8rem;
+  font-weight: 800;
+  color: var(--modal-color, #29b6f6);
+  opacity: 0.05;
+  line-height: 1;
+  pointer-events: none;
+  font-family: var(--font-main);
+  z-index: 1;
+}
+
+.fact-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  margin: 0.8rem 0;
+  position: relative;
+  z-index: 2;
+}
+
+.fact-text {
+  font-size: clamp(0.95rem, 1.1vw, 1.2rem);
+  line-height: 1.6;
+  color: #f0f4f8;
+  font-weight: 400;
+  letter-spacing: 0.2px;
+}
+
+.fact-footer-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.6rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  padding-top: 0.6rem;
+  position: relative;
+  z-index: 2;
+}
+
+.stat-pill {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.4rem 0.5rem;
+  border-radius: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.stat-label {
+  font-size: 0.58rem;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.stat-val {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--modal-color, #ffffff);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

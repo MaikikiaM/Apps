@@ -1,0 +1,1122 @@
+================================================================================
+HISTORIAL TÉCNICO Y SESIONES - PROYECTO APPS
+================================================================================
+
+### RESUMEN ARQUITECTURA SPOTILOCAL (HANDOFF.md)
+
+# SpotiLocal - Complete Project Handoff
+
+**Last updated:** 2026-11-07
+**Status:** SpotiLocal v1.8.4 (Build #75, versionCode 26) - Estadísticas de escucha blindadas, Recortes de alta precisión integrados con v1.8.x y Nivelador de Ganancia ±30 dB en tiempo real en Android Nativo y Web.
+**Version displayed to user:** v1.8.4 (`app-version.json`, `index.html`, `release.json`)
+**Internal CURRENT_APP_VERSION constant:** `1.8.4` (`app.js:349`)
+
+---
+
+## 0. Current Verified Snapshot
+
+This is the state verified immediately before the last update of this document:
+
+- The project root is `C:\Users\migue\Proyectos IA varios\SpotiLocal`.
+- The project root is not itself a Git repository.
+- `songs/` contains 12 MP3 files and `GET http://127.0.0.1:3000/api/songs` returns all 12 with HTTP 200.
+- `server.js` is currently running in the background as Node PID `26552`.
+- The server listens on `0.0.0.0:3000`; the current LAN address is `192.168.1.51`.
+- The mobile/PWA URL on the same Wi-Fi is `http://192.168.1.51:3000`.
+- Audio streaming was verified with HTTP Range: `206 Partial Content`, `Content-Type: audio/mpeg`, and a 1024-byte range response.
+- The newest timestamped queue build is `SpotiLocal_queue_ui_20260909_205325.apk` (7,471,303 bytes; modified `2026-09-09 20:53:13`).
+- Direct queue build URL: `http://192.168.1.65:3000/SpotiLocal_queue_ui_20260909_205325.apk`.
+- A new offline-capable APK was compiled successfully: `SpotiLocal_offline_queue_20260910.apk` (7,471,860 bytes). If the server is running, its direct URL is `http://192.168.1.65:3000/SpotiLocal_offline_queue_20260910.apk`.
+- A follow-up build adds a visible mobile queue entry point, interruption-free native queue insertion, native-to-local offline fallback, and statistics recovery: `SpotiLocal_offline_queue_ui_20260910.apk` (7,487,116 bytes). Direct URL: `http://192.168.1.65:3000/SpotiLocal_offline_queue_ui_20260910.apk`.
+- Canonical no-cache download name for the final build: `SpotiLocal_offline_queue_ui_statsfix_20260910.apk` (SHA-256 `A0881D0EC61E72A30CB4402D8FB32A446E9995D19F5F0999891BB195D65D4440`). Direct URL: `http://192.168.1.65:3000/SpotiLocal_offline_queue_ui_statsfix_20260910.apk`.
+- Latest stability build: `SpotiLocal_offline_stable_20260910.apk` (7,487,168 bytes; SHA-256 `32D73FF222CBA241DD368DDF0EFE2DE4994C5BD0760BF65B85723EBB9FC56414`). This build makes synchronized local blobs the primary playback path and leaves ExoPlayer only for uncached tracks.
+- Latest background-capable build: `SpotiLocal_offline_background_20260910.apk` (7,488,496 bytes; SHA-256 `D47509803AC3E6242C701CC1B732A687AA088507B8B2DB295D4DC6A70E208491`). It copies synchronized IndexedDB blobs into `NativeAudioStore` and gives ExoPlayer a local-file queue.
+- Definitive background statistics & scrobbles fix build: `SpotiLocal_background_stats_20260912.apk` (7,491,814 bytes; SHA-256 `90B8198B500E59530BD343386E28D457D7BB0EA4E2B60FB6CE723528F0964AC6`). Also mirrored to `SpotiLocal.apk`. Direct URL: `http://192.168.1.65:3000/SpotiLocal_background_stats_20260912.apk`. Tracks elapsed listening time continuously inside `PlaybackService` on Android, captures track transitions and scrobbles while the phone is locked or app minimized, persists pending stats in `SharedPreferences`, and atomically drains them to `app.js` upon app resume or poller tick.
+- `GET /api/version` still advertises legacy `SpotiPirata_v1.6.apk`; it does **not** currently advertise the timestamped queue build or the offline build. Use the explicit direct URLs above.
+- Existing historical APKs are immutable. The offline fix is present in `SpotiLocal_offline_queue_20260910.apk` and `SpotiLocal_offline_queue_ui_20260910.apk`; installing an older queue APK will not gain the fix.
+- The API key mentioned during the conversation was changed manually by the user and is intentionally not recorded here. Never put that secret in this handoff or in the web bundle.
+
+The server process is not persistent across Windows restarts. Start it again with `node server.js` or `npm start` from the project root.
+
+---
+
+## 1. What Is This Project?
+
+SpotiLocal (formerly SpotiPirata) is a **self-hosted music player** that runs as:
+- A **PWA** (Progressive Web App) in any browser
+- A **native Android APK** via Capacitor (wraps the same web code in a WebView)
+
+It streams FLAC/MP3/WAV audio from a local Node.js server running on your PC at `http://<PC_IP>:3000`, and caches songs to IndexedDB for offline playback on mobile.
+
+**Target device:** OnePlus Nord 3 5G (primary), any Android phone, any desktop browser.
+
+---
+
+## 2. Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    PC (Windows)                          │
+│                                                         │
+│  server.js ─── Node.js built-in HTTP server on :3000     │
+│     ├── GET /api/songs     → JSON list of files in songs/│
+│     ├── GET /api/version   → { version, fileName }      │
+│     ├── GET /songs/*.flac  → Raw audio stream (206)     │
+│     └── Static files       → index.html, JS, CSS, APK   │
+│                                                         │
+│  songs/               → MP3 audio files (12 currently)  │
+│  *.apk                → Versioned APK builds            │
+│  app-version.json     → { "version": "1.6" }           │
+│  cover-art.json       → Cover art URL mapping           │
+└─────────────────────────────────────────────────────────┘
+          │ HTTP (WiFi LAN)
+          ▼
+┌─────────────────────────────────────────────────────────┐
+│                    Mobile (Browser / APK)                │
+│                                                         │
+│  index.html          → SPA shell (775 lines)            │
+│  styles.css          → Spotify dark theme (2260 lines)   │
+│  id3-parser.js       → ID3v2 metadata reader (184 lines)│
+│  db.js               → IndexedDB wrapper (289 lines)     │
+│  audio-engine.js     → Web Audio API EQ (104 lines)      │
+│  app.js              → Main controller (3933 lines)      │
+│  sw.js               → Service Worker (87 lines)         │
+│  manifest.json       → PWA manifest                     │
+│                                                         │
+│  IndexedDB (SpotiLocalDB)                               │
+│     ├── songs       → Audio blobs + metadata             │
+│     ├── playlists   → Playlist objects with songIds[]    │
+│     ├── lyrics      → LRC text per songId                │
+│     └── settings    → Key-value config                   │
+│                                                         │
+│  localStorage                                              │
+│     ├── spotilocal_custom_ip        → Saved PC IP        │
+│     ├── spotilocal_listening_logs   → Play time entries  │
+│     ├── spotilocal_cached_songs     → Quick metadata     │
+│     └── spotilocal_app_version      → Installed version  │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3. All Files in the Project (with Purpose)
+
+### Core Web App
+| File | Lines | Purpose |
+|------|-------|---------|
+| `index.html` | 775 | SPA shell with all views, modals, player bar |
+| `styles.css` | 2260 | Spotify dark theme, responsive (mobile/desktop), glass morphism |
+| `app.js` | 3933 | Main controller: player, queue, playlists, stats, EQ visualizer, lyrics, settings, PWA install, MediaSession API |
+| `db.js` | 289 | IndexedDB wrapper class `MusicDB` — songs, playlists, lyrics, settings stores |
+| `audio-engine.js` | 104 | Web Audio API: 5-band EQ (60Hz, 230Hz, 910Hz, 3.6kHz, 14kHz), AnalyserNode for visualizer |
+| `id3-parser.js` | 184 | ID3v2 tag parser — reads title, artist, album, year, genre, APIC cover art from audio blobs |
+| `sw.js` | 87 | Service Worker — cache-first for static assets, network-first for API/JS |
+| `manifest.json` | 46 | PWA manifest — `display: standalone`, portrait orientation |
+
+### Server & Build
+| File | Purpose |
+|------|---------|
+| `server.js` | Node.js built-in HTTP server on port 3000, serves static files, `/api/songs` endpoint, APK downloads, and HTTP Range requests (206) for audio streaming |
+| `package.json` | `"start": "node server.js"` — no dependencies, pure Node.js http module |
+| `iniciar-servidor.bat` | Windows batch file: `node server.js` |
+| `package_apk.ps1` | PowerShell script: copies APK from Capacitor build output, injects updated web files into the ZIP at `assets/public/` paths |
+
+### Audio Generation & Tools
+| File | Purpose |
+|------|---------|
+| `generate_songs.js` | Generates 4 WAV files (synthesized audio): La Llorona, Soy Rebelde, Por qué te vas, Zigeunerweisen — writes to `songs/` |
+| `generate_more_songs.js` | Generates 7 more WAV files: Paint It Black, Viva La Vida, Libre, Fairytale, Gangsta's Paradise, Back in Black, Un beso y una flor |
+| `convert_songs.js` | Batch converts `.webm` → `.mp3` using ffmpeg |
+| `download_real_tracks.ps1` | Downloads real tracks from YouTube via `yt-dlp.exe` |
+| `create_icons.js` | Generates `icon-192.png`, `icon-512.png`, `icon.svg` — pure Node.js PNG generator (no dependencies) |
+| `yt-dlp.exe` | Binary: YouTube audio downloader |
+
+### Data & Config
+| File | Purpose |
+|------|---------|
+| `app-version.json` | `{ "version": "1.6" }` — displayed in Settings UI |
+| `cover-art.json` | Array of 12 objects: `{ title, artist, url }` — maps song titles to Apple Music cover art URLs |
+| `release.json` | `{ "version": "1.6", "versionCode": 7, "fileName": "SpotiPirata_v1.6.apk" }` |
+| `project.json` | IDE metadata: title, description, visibility |
+| `elementsData.js` | **UNRELATED** — Periodic table data for a different project, left in this directory by mistake |
+
+### APK Versions (in root)
+```
+SpotiLocal_v1.5.apk  →  SpotiLocal_v2.30.apk  (30+ versioned builds)
+SpotiPirata_v1.0.apk → SpotiPirata_v1.6.apk   (legacy name, 7 builds)
+SpotiLocal.apk        (generic)
+SpotiLocal_native_queue_20260909_201829.apk
+SpotiLocal_queue_20260909_204654.apk
+SpotiLocal_queue_ui_20260909_205325.apk  ← newest queue-labelled build
+SpotiLocal_offline_queue_20260910.apk    ← newest offline-capable build
+SpotiLocal_offline_queue_ui_20260910.apk ← offline + mobile queue button
+```
+
+### Songs Directory
+`songs/` is auto-scanned by the server. The current working copy contains these 12 MP3 files:
+
+```text
+Back in Black - ACDC.mp3
+Fairytale - Alexander Rybak.mp3
+Gangsta Paradise - Coolio.mp3
+La Llorona - Chavela Vargas.mp3
+Libre - Nino Bravo.mp3
+Paint It Black - The Rolling Stones.mp3
+Por que te vas - Jeanette.mp3
+Soy Rebelde - Jeanette.mp3
+The Winner Takes It All - ABBA.mp3
+Un beso y una flor - Nino Bravo.mp3
+Viva La Vida - Coldplay.mp3
+Zigeunerweisen - Pablo Sarasate.mp3
+```
+
+The server returns URL-encoded file paths such as `/songs/Back%20in%20Black%20-%20ACDC.mp3`. The app decodes and resolves them through `getFullUrl()`.
+
+---
+
+## 4. Key Code References (Line Numbers)
+
+### Server (`server.js`)
+- Port and static file serving: `server.js:1-35`
+- `/api/songs` endpoint (auto-scan songs folder): `server.js:52-76`
+- `/api/version` endpoint: `server.js:79-93`
+- APK download with fallback: `server.js:95-121`
+- HTTP Range request (206 Partial Content): `server.js:138-163`
+- CORS headers for WebView: `server.js:39-46`
+- Local IP detection: `server.js:167-178`
+
+### App Controller (`app.js`)
+- Capacitor/native detection: `app.js:6-7`
+- Server IP resolution & URL rewriting: `app.js:8, 26-43`
+- `CURRENT_APP_VERSION = "3.0.0"`: `app.js:330`
+- `loadSongsFromDB()` — the main sync engine: `app.js:1001-1172`
+- Song merge logic (DB + API): `app.js:1075-1115`
+- `downloadAndCacheAllSongs()` — offline blob caching: `app.js:799-854`
+- `handleFilesSelect()` — mobile file upload: `app.js:905-949`
+- `loadAndPlayCurrentSong()` — audio source resolution (blob vs stream): `app.js:1852-1985`
+- Native ExoPlayer bridge: `app.js:1911-1939`
+- Native state poller (300ms interval): `app.js:2494-2585`
+- Scrobble rule (50% threshold): `app.js:2407-2433`
+- Listening time recording (every 5s flush): `app.js:2591-2638`
+- Queue management (`getQueueEntries`, `addToQueue`): `app.js:621-659`
+- Playlist CRUD: `app.js:3477-3860`
+- Sleep timer: `app.js:3920-3945`
+- Keyboard shortcuts: `app.js:2848-2875`
+- Two-finger swipe gestures (next/prev/pause): `app.js:2122-2217`
+- Cover art hydration from catalog: `app.js:1174-1218`
+- Ambient glow color extraction: `app.js:3022-3050`
+- MediaSession API (lockscreen controls): `app.js:3053-3144`
+- PWA install prompt handling: `app.js:3882-3931`
+- Canvas visualizer (bars/wave/circle modes): `app.js:3237-3304`
+- LRC lyrics parser: `app.js:3310-3396`
+- Search: `app.js:1757-1771`
+- Crossfade: `app.js:2843-2845`
+- Speed control: `app.js:3013-3020`
+
+### Database (`db.js`)
+- IndexedDB schema (4 stores): `db.js:22-44`
+- `saveSong`, `getAllSongs`, `getSong`, `deleteSong`: `db.js:59-129`
+- `toggleLike`: `db.js:131-139`
+- `recordListeningTime`: `db.js:141-163`
+- `updateSongMeta`: `db.js:165-175`
+- Playlist CRUD: `db.js:178-240`
+- Lyrics store: `db.js:242-263`
+- Settings store: `db.js:265-286`
+
+### Audio Engine (`audio-engine.js`)
+- 5-band EQ initialization: `audio-engine.js:41-54`
+- Signal chain: `Source → EQ0 → EQ1 → EQ2 → EQ3 → EQ4 → Gain → Analyser → Destination`: `audio-engine.js:56-65`
+- Presets (flat, bassBoost, pop, rock, jazz, vocal, acoustic): `audio-engine.js:14-22`
+- Frequency bands: `[60, 230, 910, 3600, 14000]` Hz: `audio-engine.js:12`
+
+### ID3 Parser (`id3-parser.js`)
+- ID3v2 header parsing: `id3-parser.js:21-24`
+- Frame iteration (v2/v3/v4): `id3-parser.js:36-77`
+- APIC (cover art) extraction: `id3-parser.js:141-181`
+- Text encoding detection (ISO-8859-1, UTF-16, UTF-8): `id3-parser.js:111-138`
+
+### Service Worker (`sw.js`)
+- Cache name: `spotipirata-pwa-v160`: `sw.js:1`
+- Static assets list: `sw.js:2-16`
+- Stale-while-revalidate for static, network-first for API: `sw.js:41-76`
+- `SKIP_WAITING` and `CLEAR_CACHE` message handlers: `sw.js:78-87`
+
+---
+
+## 5. Features Implemented
+
+1. **Audio playback** — HTML5 Audio element + Web Audio API EQ chain
+2. **5-band equalizer** — with 7 presets (flat, bass boost, pop, rock, jazz, vocal, acoustic)
+3. **Canvas visualizer** — 3 modes: bars, wave, circular spectrum
+4. **Queue system** — pending queue + current queue, add/remove/play from queue; native additions use incremental ExoPlayer insertion without re-preparing the active track
+5. **Playlists** — create, delete, add songs, play all, view detail
+6. **Library view** — sort by (recent 10d, date added, title, artist, album), filter (all, liked, top 10d, unplayed)
+7. **Search** — global search across title/artist/album
+8. **Like/Favorite** — heart toggle per song
+9. **Edit metadata** — title, artist, album inline editing
+10. **Download individual songs** — exports as FLAC
+11. **Listening statistics** — minutes listened today/month/year/historical
+12. **Ranking view** — weekly/monthly/yearly/historical, sorted by time listened
+13. **Scrobble** — counts 1 reproduction after 50% of song duration
+14. **Lyrics** — import .LRC files, auto-scroll synced lyrics, click-to-seek
+15. **Crossfade** — configurable 0/2/4/6 seconds between songs
+16. **Sleep timer** — 15/30/45/60 minutes
+17. **Speed control** — 0.5x to 2.0x
+18. **Volume control** — slider + mute button
+19. **MediaSession API** — lockscreen/notification controls on Android
+20. **Wake Lock** — prevents screen sleep during playback
+21. **PWA install** — `beforeinstallprompt` + guide modal for manual install
+22. **Self-update** — checks `/api/version`, clears SW cache, reloads
+23. **Capacitor native bridge** — ExoPlayer integration via `window.SpotiLocalNativePlayer`
+24. **Touch gestures** — 2-finger swipe (next/prev/pause), single-finger on player bar
+25. **Ambient glow** — dynamic background color extracted from album art
+26. **Cover art catalog** — `cover-art.json` maps titles to Apple Music URLs, with fuzzy matching
+27. **ID3 parsing** — extracts metadata + embedded cover art from audio files on upload
+28. **Offline caching** — all songs downloaded to IndexedDB blobs for true offline play
+29. **Background sync** — auto-syncs from server on every load, downloads blobs silently
+30. **Export database** — downloads JSON backup of songs, playlists, listening logs
+31. **Desktop + mobile responsive** — sidebar on desktop, bottom nav on mobile
+32. **Offline-first playback** — the stability APK uses local HTML5 blobs; the background APK copies those blobs to `NativeAudioStore` and uses native local-file ExoPlayer playback
+33. **Statistics recovery** — local song metadata and listening logs have redundant localStorage/IndexedDB persistence and startup merge protection against an empty IndexedDB read
+
+---
+
+## 6. Data Flow
+
+### On App Load
+1. `initSpotiLocalApp()` called (line 3931)
+2. Detects if running as native APK or PWA (line 6-7)
+3. Purges legacy SW caches in native mode (line 11-24)
+4. Loads version from `app-version.json` (line 45-56)
+5. Loads cover art catalog from `cover-art.json` (line 74-88)
+6. `loadSongsFromDB()` called:
+   - First paints from localStorage cache (instant)
+   - Reads IndexedDB songs
+   - Fetches `/api/songs` from PC server (5s timeout)
+   - Merges DB + API songs (dedup by title/url)
+   - Saves merged back to IndexedDB
+   - Triggers silent background blob download for offline
+   - Renders UI tables/grids
+7. `loadPlaylistsFromDB()` renders sidebar + grid
+
+### On Song Play
+1. `playSongById()` or `loadAndPlayCurrentSong()` (line 1816)
+2. Checks for cached blob in IndexedDB
+3. Creates `URL.createObjectURL()` from blob, or uses stream URL
+4. If native APK: delegates to ExoPlayer bridge, pauses HTML5 audio
+5. If browser: sets `audio.src`, calls `audio.play()`
+6. Updates MediaSession metadata, wake lock, ambient glow
+7. Loads lyrics if available
+
+### On Song End
+1. `audioElement.ended` fires (line 2401)
+2. If repeat mode 2 (one): restart
+3. Else: `playNextSong()` — checks pending queue first, then advances
+4. Scrobble: increments `playCount` if >50% was played
+5. Records listening time to IndexedDB
+
+---
+
+## 6A. Offline Playback Implementation
+
+The offline fix was added after confirming that synchronized songs existed locally but the older APK still tried to send them to the native player using the saved LAN URL.
+
+### Runtime behavior
+
+1. `checkServerAudioAvailable()` in `app.js:47-77` probes only the server origin with a 2-byte HTTP Range request and caches the result for 10 seconds.
+2. `loadAndPlayCurrentSong()` in `app.js:1899-2033` loads the IndexedDB blob first. It uses the LAN stream only when the probe succeeds.
+3. In the stability build, if `audioBlob` exists, playback uses the HTML5 audio element with a `blob:` URL, even when the server is online; this prevents native/HTML5 queue contention.
+4. In `SpotiLocal_offline_background_20260910.apk`, the same blob is copied once to `NativeAudioStore` in 64 KiB chunks and ExoPlayer uses the resulting local `file://` URI, allowing Android background playback and native queue advancement without the server.
+5. `usingNativePlayback` makes play/pause, seek, previous/next, duration lookup, and the native state poller respect whether the current track is actually using ExoPlayer.
+6. If ExoPlayer reports a network error while the server disappears between tracks, the native poller switches to the local IndexedDB blob instead of leaving the queue dead (`app.js:2542-2595`).
+7. If neither a local blob nor a reachable stream exists, the UI reports that the song must be synchronized first.
+
+### Statistics persistence
+
+- When IndexedDB is temporarily empty/unavailable at startup, the API merge now uses the local metadata cache as ground truth instead of replacing existing `playCount` and `totalTimeListened` values with zeros (`app.js:1089-1120`).
+- Listening logs are stored in both `localStorage` and the IndexedDB `settings` store under `listeningLogs` (`app.js:1244-1292`). Startup merges both copies and restores the newest unique entries.
+- The current song metadata cache is written synchronously before the asynchronous IndexedDB update, reducing loss when Android closes the WebView during shutdown (`app.js:2660-2685`).
+- Uninstalling/clearing Android app data still deletes both stores; no application can recover data after that without an exported backup.
+
+### Installation requirement
+
+The old APK cannot be repaired remotely because its JavaScript/native bridge is bundled inside the APK. Install `SpotiLocal_offline_background_20260910.apk` over the existing app, without clearing app data, so the songs and statistics already stored in `SpotiLocalDB` are preserved. If Android rejects the update because the APK signature differs, installing after uninstalling may delete the IndexedDB library; in that case start the server once, install the new APK, synchronize all songs, wait for the first local-native transfer, and then test with Wi-Fi/server disabled.
+
+### Queue UI Access
+
+- Desktop: click the list icon in the bottom player bar (`index.html:548`).
+- Mobile: tap the current song/player bar to open the expanded player, then tap **Cola** in the expanded tools row (`index.html:636`). The compact mobile player hides `.player-right`, which is why the older queue build appeared not to have a queue button.
+- The queue modal itself is defined in `index.html:641-661`; its rendering and add/remove behavior are in `app.js:3415-3472`.
+
+### Offline acceptance test
+
+1. Install the new offline APK over the previous APK; do not clear storage.
+2. Open the library while the server is available and verify the songs are present.
+3. Turn off Wi-Fi/mobile data, or stop `server.js`.
+4. Play a previously synchronized song, pause/resume it, seek, change volume, and move to next/previous.
+5. On the background build, the first play may take time while the song/queue is copied into native storage; later launches reuse those local files and do not need the server.
+
+---
+
+## 7. Capacitor APK Build Process
+
+### Directory Structure
+```
+c:\Users\migue\Antigravity\SpotiLocal\     ← Capacitor project root (where the Android project lives)
+c:\Users\migue\Proyectos IA varios\SpotiLocal\  ← THIS directory (web source files)
+```
+
+There is also an `apk-build/` tree under the current project root, including a staged `apk-build/www/` copy of web assets. Treat the root-level web files (`index.html`, `app.js`, `db.js`, `audio-engine.js`, `id3-parser.js`, `styles.css`, `sw.js`, and the JSON assets) as the canonical editable source. Do not assume that every APK in the directory was generated from the current source: the timestamped queue APKs are historical build artefacts.
+
+### Steps
+1. Web files live in THIS directory (`Proyectos IA varios\SpotiLocal`).
+2. The checked-in `package_apk.ps1` is hardcoded to `c:\Users\migue\Antigravity\SpotiLocal`, so its `$baseDir` must be reviewed before reuse.
+3. Copy/sync the canonical web files into the actual Capacitor project used for the build.
+4. Build with `npx cap sync android`, then `./gradlew assembleDebug` from the Android project. On this Windows machine, use JDK 21 explicitly:
+   `set JAVA_HOME=C:\Program Files\Java\jdk-21.0.12` followed by `gradlew.bat assembleDebug --no-daemon`.
+5. The expected debug output is `apk-build\android\app\build\outputs\apk\debug\app-debug.apk` relative to the Capacitor project.
+6. Run the packaging script only after checking its hardcoded source/destination paths. It injects files into the APK ZIP at `assets/public/` and currently names the destination `SpotiPirata_v1.3.apk`.
+
+### Key Paths in `package_apk.ps1`
+- Source APK: `$baseDir\apk-build\android\app\build\outputs\apk\debug\app-debug.apk`
+- Destination: `$baseDir\SpotiPirata_v1.3.apk` (hardcoded version — update for new builds)
+- Files injected into APK ZIP at `assets/public/` path
+
+The timestamped queue APKs in the current project root were not produced by a documented reproducible command in this working copy. They are usable download artefacts, but their exact native source revision is not inferable from the filename alone.
+
+The current offline APK was built from `apk-build/android/app/build/outputs/apk/debug/app-debug.apk` and copied to the root as `SpotiLocal_offline_queue_20260910.apk`.
+
+### Android Bridge
+The APK exposes `window.SpotiLocalNativePlayer` with methods:
+- `isAvailable()` — check if native player exists
+- `load(url, mediaId, title, artist, album, artworkUrl)` — load track
+- `play()`, `pause()`, `stop()`
+- `seekTo(ms)`
+- `getState()` — returns JSON `{ isPlaying, positionMs, durationMs, mediaId, ended, error }`
+- `setQueue(jsonString)` — queue of `{ id, url, title, artist, album, artworkUrl }`
+- `setVolume(0-1)`, `setPlaybackRate(0.5-2.0)`
+- `setRepeatMode(0/1/2)`
+- `setEqBand(index, gainValue)` — 5-band EQ passthrough
+
+---
+
+## 8. Cover Art System
+
+`cover-art.json` is an array of `{ title, artist, url }` where URLs are Apple Music CDN links (`600x600bb.jpg`).
+
+The matching algorithm (`getMappedCoverUrl` in `app.js:98-109`):
+1. Normalizes title and artist (lowercase, strip accents, strip non-alphanumeric)
+2. Checks bidirectional `includes()` matching
+3. Matches if title contains catalog title AND (artist matches OR either is empty)
+
+The `hydrateCoverArt()` function (`app.js:1174-1218`) runs after song load:
+- For each song, finds matching cover URL
+- Downloads the cover image blob
+- Saves to IndexedDB
+- Re-renders UI
+
+---
+
+## 9. Known Issues / Gotchas
+
+1. **`elementsData.js`** — This is a periodic table dataset for a completely different project. It's included in the directory but NOT loaded by `index.html`. Can be safely deleted.
+
+2. **Version constants** — `app-version.json` says `"1.6"`, `CURRENT_APP_VERSION` in `app.js:330` says `"3.0.0"`, `server.js:86` returns `"1.6"`. The user-facing version is `1.6`.
+
+3. **`package_apk.ps1`** is hardcoded to `SpotiPirata_v1.3.apk` — needs manual update for each new build.
+
+4. **Service Worker cache name** is `spotipirata-pwa-v160` — doesn't match version numbers. Incrementing this triggers fresh cache.
+
+5. **`download_real_tracks.ps1`** writes to `c:\Users\migue\Antigravity\songs\` (wrong path — should be current directory). Also references `yt-dlp.exe` at `c:\Users\migue\Antigravity\yt-dlp.exe`.
+
+6. **No `node_modules`** — the server uses only Node.js built-in modules (`http`, `fs`, `path`, `os`). No `npm install` needed.
+
+7. **Audio formats** — The server serves any format in the MIME map, but the app specifically handles: `.flac`, `.mp3`, `.wav`, `.m4a`, `.ogg`, `.aac`, `.webm`.
+
+8. **`getFullUrl()` rewriting** — In native APK mode, all URLs pointing to `localhost:3000` are rewritten to `<activeServerIp>:3000`. The IP is stored in localStorage key `spotilocal_custom_ip`.
+
+9. **Automatic update mismatch** — `server.js:85-90` advertises `SpotiPirata_v1.6.apk`, while the newest queue-labelled artefact is `SpotiLocal_queue_ui_20260909_205325.apk`. Use the direct queue URL from the current snapshot unless `server.js` is deliberately updated.
+
+10. **Generated extension mismatch** — `generate_songs.js` and `generate_more_songs.js` write PCM RIFF/WAV data into filenames ending in `.flac`. These generated files are not genuine FLAC files. The current hosted library is MP3, so this does not affect the current server test.
+
+11. **Two source roots** — The active web root is under `Proyectos IA varios`, but `package_apk.ps1` targets `Antigravity`. This can silently package stale files unless the source paths are aligned first.
+
+12. **LAN prerequisites** — The phone and PC must be on the same Wi-Fi, Windows Firewall must allow inbound TCP 3000, and the phone must use the current PC IP. If DHCP changes the IP, update Settings > Dirección IP de tu PC en la Red Wi-Fi.
+
+13. **Offline APK deployment** — Updating `app.js` or `apk-build/www/app.js` does not update an already installed APK. Rebuild and install `SpotiLocal_offline_queue_20260910.apk`; preserve app data if the synchronized IndexedDB library must survive the update.
+
+---
+
+## 10. How to Recreate from Scratch (5-Minute Guide)
+
+```bash
+# 1. Install Node.js (already on this machine at C:\Program Files\nodejs\node.exe)
+
+# 2. Navigate to project
+cd "C:\Users\migue\Proyectos IA varios\SpotiLocal"
+
+# 3. Generate sample songs (creates WAV files in songs/)
+node generate_songs.js
+node generate_more_songs.js
+
+# 4. (Optional) Generate icons
+node create_icons.js
+
+# 5. Start the server
+node server.js
+# → Server runs on http://localhost:3000
+# → Phone connects via WiFi at http://<PC_IP>:3000
+
+# 6. Open in browser
+# → http://localhost:3000 (desktop)
+# → http://<PC_IP>:3000 (mobile phone on same WiFi)
+```
+
+No dependencies. No build step. No configuration files needed.
+
+### Current Machine Shortcut
+
+For the current machine, the verified commands/URLs are:
+
+```powershell
+Start-Process -FilePath "C:\Program Files\nodejs\node.exe" -ArgumentList "server.js" -WorkingDirectory "C:\Users\migue\Proyectos IA varios\SpotiLocal"
+
+# App/PWA and song sync:
+http://192.168.1.65:3000
+
+# Latest queue-labelled APK artefact:
+http://192.168.1.65:3000/SpotiLocal_queue_ui_20260909_205325.apk
+
+# Offline-capable APK built from the current source:
+http://192.168.1.65:3000/SpotiLocal_offline_queue_20260910.apk
+
+# Offline-capable APK with visible mobile queue button:
+http://192.168.1.65:3000/SpotiLocal_offline_queue_ui_20260910.apk
+
+# Final unique-name APK (avoid cached previous downloads):
+http://192.168.1.65:3000/SpotiLocal_offline_queue_ui_statsfix_20260910.apk
+
+# Latest stability APK: synchronized songs always use local IndexedDB audio:
+http://192.168.1.65:3000/SpotiLocal_offline_stable_20260910.apk
+
+# Background-capable offline APK: local blobs copied to native ExoPlayer storage:
+http://192.168.1.65:3000/SpotiLocal_offline_background_20260910.apk
+
+# Diagnostics:
+http://192.168.1.65:3000/api/songs
+http://192.168.1.65:3000/api/version
+```
+
+In the mobile app, save `192.168.1.65` in the PC IP setting and press **Sincronizar Música**. The app first uses local IndexedDB/localStorage, then fetches `/api/songs`, merges server metadata, and downloads missing audio blobs in the background.
+
+---
+
+## 11. localStorage Keys
+
+| Key | Type | Purpose |
+|-----|------|---------|
+| `spotilocal_custom_ip` | string | Saved PC IP address for native APK |
+| `spotilocal_listening_logs` | JSON array | `[{ timestamp, songId, seconds, playlistId }]` — capped at 10000 entries |
+| `spotilocal_cached_songs` | JSON array | Lightweight song metadata for instant first-paint |
+| `spotilocal_app_version` | string | Last installed PWA version |
+
+---
+
+## 12. IndexedDB Schema (`SpotiLocalDB` v1)
+
+### Store: `songs`
+Key: `id` (string)
+Indexes: `title`, `artist`, `album`, `isLiked`, `dateAdded`
+Fields: `id, title, artist, album, year, genre, audioBlob (Blob), coverBlob (Blob), coverUrl, audioUrl, isLiked, playCount, totalTimeListened, dateAdded`
+
+### Store: `playlists`
+Key: `id` (string)
+Fields: `id, name, songIds[] (string[]), createdAt, totalTimeListened`
+
+### Store: `lyrics`
+Key: `songId` (string)
+Fields: `songId, content (LRC text)`
+
+### Store: `settings`
+Key: `key` (string)
+Fields: `key, value`
+Known keys: `globalTotalSeconds`
+
+---
+
+## 13. CSS Design System
+
+### Color Variables (`styles.css:5-24`)
+```css
+--spotify-green: #1db954;
+--spotify-black: #121212;
+--spotify-dark-grey: #181818;
+--spotify-light-grey: #282828;
+--spotify-grey: #b3b3b3;
+--spotify-white: #ffffff;
+--glass-bg: rgba(255, 255, 255, 0.04);
+--glass-border: rgba(255, 255, 255, 0.08);
+--card-hover: #282828;
+--accent-glow: rgba(29, 185, 84, 0.3);
+```
+
+### Fonts
+- Main: `'Inter'` (weights 300-800)
+- Display: `'Outfit'` (weights 500-800)
+
+### Layout
+- Desktop: sidebar (250px) + main content + bottom player (85px)
+- Mobile: top header (60px) + content + bottom player (64px) + bottom nav (65px)
+- Grid: CSS Grid with `grid-template-columns` and `grid-template-rows`
+- Responsive breakpoint: `1024px`
+
+### Key UI Components
+- `.music-card` — grid cards for recent/favorites/playlists
+- `.song-row` — table rows for library/ranking/queue
+- `.filter-chip` — pill buttons for filters
+- `.player-bar` — fixed bottom player (3-column grid)
+- `.expanded-modal` — fullscreen player overlay
+- `.modal-backdrop` — centered modal dialogs
+- `.preset-chip` — EQ preset selector buttons
+- `.queue-entry` — queue list items
+
+---
+
+## 14. JavaScript Libraries Used
+
+| Library | Source | Purpose |
+|---------|--------|---------|
+| Font Awesome 6.4.0 | CDN | Icons throughout the UI |
+| Google Fonts (Inter, Outfit) | CDN | Typography |
+| None other | — | Everything else is vanilla JS |
+
+The project has **zero npm dependencies**. The `package.json` has no `dependencies` field.
+
+---
+
+## 15. File Paths Reference
+
+All paths are relative to project root:
+```
+C:\Users\migue\Proyectos IA varios\SpotiLocal\
+```
+
+Capacitor build project (separate):
+```
+C:\Users\migue\Antigravity\SpotiLocal\
+```
+
+Capacitor APK output:
+```
+C:\Users\migue\Antigravity\SpotiLocal\apk-build\android\app\build\outputs\apk\debug\app-debug.apk
+```
+
+---
+
+## 16. Worklog / Handoff History
+
+This section records the project-context actions that happened during the handoff session, without storing credentials:
+
+1. The codebase was inspected across the root HTML, CSS, JavaScript, Node server, PWA manifest/service worker, IndexedDB wrapper, metadata parser, audio engine, build scripts, release metadata, cover-art catalog, and song tooling.
+2. `HANDOFF.md` was created as the main cross-IA/project handoff document. It intentionally does not contain API keys or other secrets.
+3. The user manually changed an external Go/API key. Its value is not present in this project and must not be copied into the handoff.
+4. The server was started from the project root as a detached Node process. The verified process at the time of writing was PID `26552`.
+5. The LAN server was tested at `http://192.168.1.65:3000`: root returned HTTP 200, `/api/songs` returned HTTP 200 with 12 tracks, and an MP3 Range request returned HTTP 206 with `audio/mpeg`.
+6. The direct latest queue-labelled APK link was verified with HTTP 200 and `application/vnd.android.package-archive`.
+7. `node --check server.js` and `node --check app.js` completed without syntax errors.
+8. Offline playback was corrected in the canonical `app.js`, `apk-build/www/app.js`, and generated Android public assets: local IndexedDB blobs now win when the LAN stream is unavailable, and native polling no longer overrides local playback.
+9. `npx.cmd cap copy android` completed successfully.
+10. `gradlew.bat assembleDebug --no-daemon` completed successfully with `JAVA_HOME=C:\Program Files\Java\jdk-21.0.12`.
+11. The resulting APK is `SpotiLocal_offline_queue_20260910.apk`; its embedded `assets/public/app.js` was inspected and confirmed to contain the server probe, offline fallback, and native-mode guard.
+12. The source copies were syntax-checked with `node --check`; all three canonical/staged `app.js` copies have 4066 lines and the same SHA-256 hash.
+13. The mobile queue access gap was fixed by adding `btn-open-queue-expanded` to the expanded player in `index.html` and wiring it to the existing queue modal.
+14. The final combined build is `SpotiLocal_offline_queue_ui_20260910.apk`; its embedded HTML/JS was inspected and confirmed to contain the mobile queue button, handler, and offline fallback.
+15. Queue insertion was optimized: the native bridge now exposes `insertQueueItem()`, and `PlaybackService` uses `player.addMediaItem()` instead of rebuilding/preparing the current playlist when a pending song is added.
+16. Native-to-local fallback and statistics persistence were audited and implemented after the first offline APK still lost the native stream when the server disappeared between tracks.
+17. The final APK was rebuilt successfully and verified at HTTP 200 with size 7,487,116 bytes; its embedded JavaScript contains the native fallback, IndexedDB log backup, and incremental queue insertion.
+18. The final APK was copied to the unique filename `SpotiLocal_offline_queue_ui_statsfix_20260910.apk` to prevent browser/Android cache ambiguity. Its ZIP contents were verified and its HTTP response returned status 200 with the expected APK MIME type and length.
+19. After observing severe runtime instability, the playback policy was simplified: synchronized songs no longer probe/use the server or native player at all; they play through the local HTML5/IndexedDB path. The new stability build is `SpotiLocal_offline_stable_20260910.apk`.
+20. The definitive background fix was then implemented: synchronized blobs are transferred in 64 KiB chunks to `NativeAudioStore`, and the native queue uses persistent local `file://` URIs. The resulting APK is `SpotiLocal_offline_background_20260910.apk`.
+21. Background statistics and scrobbles tracking fix (2026-09-12): When outside the app on Android (screen off or app minimized), Android paused JavaScript in the WebView, causing the poller to drop accumulated intervals (`delta < 3`) and missing track transitions/scrobbles. Fixed by implementing continuous real-time listening accumulation, scrobble detection, and disk persistence in `PlaybackService.java` (`SharedPreferences`), exposed via `NativePlayerBridge.drainListeningStats()` and consumed atomically in `app.js` upon app resume and state polling. Built and published `SpotiLocal_background_stats_20260912.apk` (and mirrored to `SpotiLocal.apk`).
+
+If another AI takes over, read this file first, then inspect the actual root-level source files before changing anything. Treat runtime state (PID, IP, cached data, and APK availability) as potentially stale after a reboot or DHCP change and re-run the diagnostics above.
+
+
+### HISTORIAL COMPLETO DE DESARROLLO SPOTILOCAL
+
+================================================================================
+REGISTRO CRONOLÓGICO CONTINUO DE DESARROLLO - SPOTILOCAL
+Archivo: registro_proyecto.text
+Regla de oro: NUNCA sobrescribir ni borrar contenido anterior. Modo APPEND continuo.
+================================================================================
+
+================================================================================
+[FASE 1: 09/08/2026 - 10/08/2026 | BLOQUES v1.1.0 A v1.4.4]
+Hito: Origen de SpotiLocal, Prototipo PWA y Migración a Motor Nativo Capacitor
+Compilaciones: #1 (v1.1) a #35 (v1.4.4)
+================================================================================
+1. CONTEXTO Y PROMPTS INICIALES:
+   - Creación de un reproductor de música local offline y de red LAN con estética profesional idéntica a Spotify (modo oscuro, carátulas en alta resolución, tipografía Circular/Inter, controles multimedia).
+   - Necesidad de superar las restricciones del navegador móvil (reproducción en segundo plano, control de volumen nativo y lectura de etiquetas ID3 sin servidor central).
+2. DECISIONES DE ARQUITECTURA Y LÓGICA:
+   - Interfaz Web / PWA (HTML5, CSS modular en styles.css y app.js):
+     * Arquitectura cliente-servidor ultraligera con server.js en Node.js para streaming HTTP Range (soporte de 206 Partial Content para seek fluido sin descargar archivos completos).
+     * id3-parser.js: parser cliente-side de metadatos ID3v1 y ID3v2 para extraer título, artista, álbum y carátulas incrustadas en formato Blob/ArrayBuffer.
+     * audio-engine.js: motor de audio basado en Web Audio API con ecualizador de 5 bandas y analizador en tiempo real para visualizador en Canvas.
+   - Migración a Android Nativo (Capacitor):
+     * En v1.2.2 (antigua v2.8), se incorporó el puente nativo Capacitor (com.spotilocal.app) para permitir que la app se instale como APK independiente.
+     * Creación de NativeAudioStore y NativePlayerBridge para gestionar la caché local de archivos.
+3. ARCHIVOS CREADOS / MODIFICADOS:
+   - index.html, styles.css, app.js, server.js, audio-engine.js, id3-parser.js
+   - apk-build/android/ (Proyecto base Capacitor con Gradle)
+4. COMPILACIONES DESTACADAS:
+   - v1.1 (#1 | 09/08/2026 19:32): Primer APK SpotiLocal en WebView.
+   - v1.2.2 (#13 | 10/08/2026 02:16): Primera integración de Capacitor y puente nativo Android.
+   - v1.4.4 (#35 | 10/08/2026 18:19): Cierre del ciclo inicial v2 con cola y gestos táctiles.
+
+================================================================================
+[FASE 2: 15/08/2026 | BLOQUES v1.4.5 A v1.5.1]
+Hito: Rama Experimental SpotiPirata, Letras Sincronizadas LRC y Compatibilidad
+Compilaciones: #36 (v1.4.5) a #42 (v1.5.1)
+================================================================================
+1. CONTEXTO Y PROMPTS:
+   - Pruebas de compatibilidad con Android 14 (gestión estricta de permisos de Foreground Service y audio local).
+   - Necesidad de soporte para letras sincronizadas en tiempo real tipo Spotify Karaoke.
+2. DECISIONES DE ARQUITECTURA:
+   - Integración de visor de letras LRC: parser de marcas de tiempo [mm:ss.xx] con auto-scroll fluido y resaltado activo de la línea cantada.
+   - Visualizador de ondas en canvas reactivo al espectro de frecuencias.
+   - Guardado persistente de configuraciones y preferencias de usuario.
+3. ARCHIVOS MODIFICADOS:
+   - app.js, index.html, styles.css
+4. COMPILACIONES:
+   - v1.4.5 (#36 | 15/08/2026 19:02) a v1.5.1 (#42 | 15/08/2026 20:30).
+
+================================================================================
+[FASE 3: 09/09/2026 | BLOQUES v1.5.2 A v1.5.9]
+Hito: Integración Nativa de Google ExoPlayer (Media3) y Ecualizador de 24 Bandas
+Compilaciones: #43 (v1.5.2) a #50 (v1.5.9)
+================================================================================
+1. CONTEXTO Y PROMPTS:
+   - Problema detectado: MediaPlayer estándar de Android y WebView sufrían cortes de audio y paradas al bloquear la pantalla o cambiar de aplicación.
+   - Requisito de un ecualizador profesional de alta resolución y reordenación visual de cola.
+2. DECISIONES DE ARQUITECTURA:
+   - Sustitución del motor por Google ExoPlayer (androidx.media3:media3-exoplayer:1.5.1, media3-session, media3-datasource).
+   - Implementación de PlaybackService.java: Foreground Service nativo con notificación persistente multimedia, MediaSession integrada y control desde la pantalla de bloqueo y dispositivos Bluetooth.
+   - Ecualizador de 24 bandas paramétricas (eq24) implementado en Java con ecualización de precisión auditiva.
+   - Modal interactivo de cola con reordenación drag & drop en vivo.
+3. ARCHIVOS MODIFICADOS:
+   - PlaybackService.java (creación del servicio nativo Media3)
+   - NativePlayerBridge.java (enlace JavaScript-Java con anotaciones @JavascriptInterface)
+   - build.gradle (dependencias Media3)
+   - app.js (control de sincronización de cola ExoPlayer)
+4. COMPILACIONES:
+   - v1.5.5 (#46 | 09/09/2026 20:15): Primera versión con ExoPlayer nativo integrado.
+   - v1.5.7 (#48 | 09/09/2026 20:39): Ecualizador de 24 bandas activo.
+   - v1.5.9 (#50 | 09/09/2026 20:53): Modal de cola visual completado.
+
+================================================================================
+[FASE 4: 10/09/2026 - 27/09/2026 | BLOQUES v1.6.0 A v1.6.9]
+Hito: Modo Offline Completo con IndexedDB y Tracking de Estadísticas en Reposo
+Compilaciones: #51 (v1.6.0) a #60 (v1.6.9)
+================================================================================
+1. PROMPTS LITERALES DEL USUARIO:
+   - [12/09/2026 17:30:23]: "Hola, vamos a trabjar sobre la app para parchear un problema de las estadisticas que no se cuentan los minutos si estas fuera de la app (todo el resto de cosas funciona a la perfeccion). Como es muy importante no romper la app, antes de hacer nada informate de absolutamente todo y me dices si tienes alguna duda de algo"
+   - [12/09/2026 17:42:38]: "Estas 100% seguro de que no has roto ninguna funcion?"
+   - [14/09/2026 23:35:06]: "Te comento. Ahora las stats y todo funciona muy bien (aunque admito que la aleatoriedad...)"
+   - [14/09/2026 23:47:54]: "Antes de esta nueva update ya pasaba: Los losgos en la clasificacion estan bugeados..."
+   - [17/09/2026 16:51:15]: "Por algun motivo, cada vez que abro la app se queda en negro y tengo que cerrar y volver a abrirla..."
+   - [20/09/2026 23:27:58]: "pq ocupa menos el archivo ahora"
+   - [27/09/2026 16:42:27]: "Se sigue congelando cada vez que lo abro. Ademas, añado que desde hace varias updates se bugean las canciones que no tienen caratula..."
+2. DECISIONES DE ARQUITECTURA:
+   - db.js (IndexedDB SpotiLocalDB v2):
+     * Arquitectura de separación de almacenamiento: almacén songs para metadatos ligeros (garantiza lecturas de 0 ms en búsquedas y renderizado) y almacén dedicado song_blobs para los archivos de audio pesado (evita fugas de memoria RAM y congelaciones de UI).
+   - Sincronización NativeAudioStore:
+     * Los blobs guardados en IndexedDB se transmiten al almacenamiento nativo de la app para que ExoPlayer los reproduzca como archivos locales FileUri en Android sin dependencia de red.
+   - Tracking Atómico de Estadísticas en Reposo:
+     * PlaybackService.java cuenta continuamente los segundos reales transcurridos mediante SystemClock.elapsedRealtime().
+     * Alerta scrobble al superar el 50% de la pista.
+     * Persistencia en SharedPreferences y drenaje atómico a app.js y db.js al abrir la aplicación.
+3. COMPILACIONES:
+   - v1.6.0 (#51 | 10/09/2026 10:34): Descarga offline en IndexedDB.
+   - v1.6.3 (#54 | 10/09/2026 11:53): Versión offline móvil estable.
+   - v1.6.5 (#56 | 12/09/2026 17:37): Contador de tiempo en segundo plano y estadísticas.
+   - v1.6.9 (#60 | 27/09/2026 16:51): Hidratación de estadísticas en arranque en frío.
+
+================================================================================
+[FASE 5: 31/10/2026 - 02/11/2026 | BLOQUES v1.7.0 A v1.7.2]
+Hitos: Bucle Infinito Continuo y Unificación de Categorías Anuales vs Históricas
+Compilaciones: #61 (v1.7.0) a #63 (v1.7.2)
+================================================================================
+1. PROMPTS DEL USUARIO:
+   - "una cosa que no me gusta es que si pongo por ejemplo la ultima del ranking, no salta al principio del ranking para la siguiente cancion o a cualqueir otra. Quiero que sea continua la musica siempre. Que nunca pueda acabarse el bucle /plan"
+   - "quiero que 'este año' muestre lo que he escuhado ESTE AÑO y el historico que muestre el TOTAL. Tan dificil es literalmente poner las categorias bien?"
+2. DECISIONES DE ARQUITECTURA:
+   - Modo de repetición infinita:
+     * ExoPlayer configurado permanentemente con Player.REPEAT_MODE_ALL en PlaybackService.java.
+     * En app.js, si se alcanza el final de una lista o ranking, se enlaza automáticamente con el inicio, manteniendo la música sonando ininterrumpidamente.
+   - Métricas y Estadísticas Anuales vs Totales:
+     * db.js y app.js depurados para filtrar de manera estricta los eventos timestamped dentro del año actual (1 de enero a 31 de diciembre de 2026) para la tarjeta "Este Año".
+     * La tarjeta "Histórico" acumula el 100% de la actividad registrada en la base de datos sin límite temporal.
+3. ARCHIVOS MODIFICADOS:
+   - app.js, db.js, index.html, PlaybackService.java
+4. COMPILACIONES:
+   - v1.7.0 (#61 | 31/10/2026 18:39): Optimización de reanudación y shuffle seguro con crypto RNG.
+   - v1.7.1 (#62 | 31/10/2026 19:51): Bucle infinito en todas las listas.
+   - v1.7.2 (#63 | 02/11/2026 17:50): Corrección estricta de categorías estadísticas.
+
+================================================================================
+[FASE 6: 03/11/2026 | BLOQUE v1.7.3]
+Hito: Continuidad Total de Pausa en Reposo (FGS Persistente) y Normalización Odométrica de Versiones
+Compilaciones: #64 (v1.7.3)
+================================================================================
+1. PROMPTS DEL USUARIO:
+   - "Sigo perdiendo la continuidad de la app. O sea, sigo perdiendo el que este la musica pausada enseguida. En cuanto la pauso, practicamente de forma inmediata ya no puedo reanudarla sin entrar en la app antes"
+   - "Podrias investigar todas las versiones realizadas y por fecha de modificacion entregarles versiones? Quiero que cada numero principal cambie tras completar 9 secundarios (que no haya 1.10, como mucho 1.9) y que cada secundario varie cada 9 terciarios; que haya 1,2,3... de la forma, por ejemplo: 1.8 y 1.8.2, es decir, que realmente haya 10 posibles versiones para un secundario. El numero principal es el 1, el secundario el 8 y el terciario el 2 en el ejemplo de 1.8.2 /plan"
+2. DECISIONES DE ARQUITECTURA:
+   - Continuidad de Pausa en Segundo Plano:
+     * Causa identificada: OxygenOS/Android congela el proceso si la notificación se degrada a dismissible en pausa.
+     * PlaybackService.java: override de onUpdateNotification(session, startInForegroundRequired) para mantener el Foreground Service activo (mediaPlayback) aun estando en pausa.
+     * Timeout de inactividad de 3 horas continuas de pausa antes del apagado automático para no gastar batería innecesaria.
+     * Cero consumo de CPU en pausa: ticker detenido mientras isPlaying == false.
+     * NativeAudioStore.java: soporte de transferencias concurrentes multi-stream mediante transferId único para evitar colisiones entre precarga y reproducción.
+   - Normalización Odométrica de Versiones:
+     * Se investigaron los 66 APKs en disco mediante SHA-256 y fecha LastWriteTime, encontrando 64 compilaciones binarias únicas y 2 duplicados/alias.
+     * Creación de la carpeta versions/ y archivo ordenado de los 64 APKs renombrados con nomenclatura homogénea (v1.1 a v1.7.3).
+     * Sincronización del proyecto a v1.7.3 (Código 15) en app-version.json, build.gradle, app.js e index.html.
+3. COMPILACIÓN:
+   - Gradle assembleDebug: BUILD SUCCESSFUL in 12s.
+   - APK: SpotiLocal_v1.7.3.apk (7,455,176 bytes | SHA-256: A7ED6C28BD80B779FA85E78EED02D51BAD98E6937DFB40A3FDEDF5EE365AA2C9).
+
+================================================================================
+[FASE 7: 04/11/2026 | BLOQUES v1.7.4 A v1.7.7]
+Hito: Suite de Recorte de Canciones, Herramientas de Audio para Música Pirata y Directivas de Auditoría Continua
+Compilaciones: #65 (v1.7.4) a #68 (v1.7.7)
+================================================================================
+1. PROMPTS LITERALES DEL USUARIO:
+   - [04/11/2026 12:10]: "Quiero añadir una funcion para acortar las canciones. Es decir, como yo descargo de forma pirata, a veces hay por ejemplo aplausos o cosas. Quiero tener la opcion de cortar cachos. Antes de que hagamos nada, quiero que pienses si puede haber alguna otra mejora que no suela estar en spotify pero que en nuestro contexto sí nos resulte util /plan"
+   - [04/11/2026 12:20]: "cuantas versiones ha habido ya? por curiosidad"
+   - [04/11/2026 12:22]: "Estas registrando todo en cada .tex?"
+   - [04/11/2026 12:24]: "estas trabajando de esta forma?
+     Eres mi asistente de desarrollo y debes cumplir estrictamente dos directivas operativas permanentes en todas tus intervenciones:
+     1. CABECERA DE TIEMPO OBLIGATORIA: ⏱️ [Prompt: HH:MM:SS | Respuesta: HH:MM:SS]
+     2. REGISTRO CRONOLÓGICO CONTINUO EN UN ARCHIVO .TEXT (registro_proyecto.text) en modo append."
+   - [04/11/2026 12:27]: "Bueno, no pasa nada por empezarlo ahora. Crees que puedes completarlo con las sesiones anteriores? de forma detallada o es muy tarde? Requieres que te de espacio en un repositorio de github?"
+   - [04/11/2026 12:35]: "Claro, pero por ejemplo mis promtps no has podido imagino"
+   - [04/11/2026 12:37]: "Nah, no hace falta un github porque este proyecto no es tan grande como otros y ya tenemos un historico de versiones excelente"
+   - [04/11/2026 12:45]: "por algun motivo no puedo poner el recorte para despues de 3 minutos. el fin"
+   - [04/11/2026 13:14]: "como funciona lo de los recortes? Ahora si veo que puedo bajarlo al numero pero no veo como se traslada a la cancion"
+   - [04/11/2026 13:38]: "que sistema es el que estas usando que edita el tamaño de forma  automatica? esta bastante bien"
+   - [04/11/2026 13:42]: "tengo la opcion dedesactivar esa funcion?"
+   - [04/11/2026 13:45]: "pero no se recorta sola actualmente? Y me molaria la opcion A"
+   - [04/11/2026 14:16]: "Obviamente los recortes son una unica fase. es una tonteria que 7 versiones correspondan a 7 fases y 61 versiones anteriores a 5"
+
+2. DECISIONES DE ARQUITECTURA Y EVOLUCIÓN TÉCNICA DE LA FASE:
+   - Hito 7.1 (v1.7.4 | Compilación #65):
+     * Motor de Recorte Virtual no destructivo (sin re-codificación, sin pérdida acústica y sin duplicar archivos en almacenamiento).
+     * Integración con ExoPlayer (MediaItem.ClippingConfiguration) y Web Audio (timeupdate).
+     * Auto-detección de silencios acústicos mediante análisis RMS en ventanas de 50ms sobre AudioBuffer.
+     * Nivelador de volumen por canción (gainDb) y limpiador inteligente de metadatos de YouTube.
+     * Adopción de Directivas Operativas Permanentes (Cabecera horaria obligatoria y registro continuo en .text).
+     * Ratificación de gestión 100% local (autonomía mediante el catálogo versions/ sin GitHub).
+   - Hito 7.2 (v1.7.5 | Compilación #66):
+     * Corrección del cuello de botella de 180s: eliminación de topes rígidos de 3 minutos en app.js y recálculo visual de porcentajes.
+     * Sonda asíncrona no invasiva de duración (resolveSongDuration) mediante lectura de ExoPlayer Timeline (Timeline.Period.getDurationMs()) y audio probe metadata.
+     * Auto-expansión dinámica de la escala del deslizador al avanzar con botones táctiles (+0.5s y 📍 Aquí).
+   - Hito 7.3 (v1.7.6 | Compilación #67):
+     * Aplicación inmediata en caliente (Hot-Reload) en ExoPlayer: firma enriquecida de cola (signatureBuilder) y reemplazo dinámico (player.replaceMediaItem) del ítem en reproducción.
+     * Distintivo visual en biblioteca: etiqueta verde ✂️ Recortada y resaltado de controles para canciones con recorte activo.
+   - Hito 7.4 (v1.7.7 | Compilación #68):
+     * Implementación del interruptor On/Off individual por canción (toggle-trim-enabled) en el modal de recorte.
+     * Reversibilidad instantánea: permite desactivar el recorte y escuchar la versión completa sin perder ni borrar las marcas de tiempo configuradas.
+     * Reorganización y consolidación del registro del proyecto en 7 fases reales y balanceadas.
+
+3. ARCHIVOS MODIFICADOS EN LA FASE:
+   - apk-build/android/app/src/main/java/com/spotilocal/app/PlaybackService.java
+   - apk-build/android/app/src/main/java/com/spotilocal/app/NativePlayerBridge.java
+   - db.js
+   - app.js
+   - index.html
+   - styles.css
+   - app-version.json
+   - apk-build/android/app/build.gradle
+   - registro_proyecto.text
+
+4. COMPILACIONES DE LA FASE 7 (v1.7.4 A v1.7.7):
+   - v1.7.4 (#65 | 04/11/2026 12:13): 7,464,268 bytes | SHA-256: C1F2113B2755E9AE0959ED8D1D648F21197ACDB2ECFC769828991006E5CEA764
+   - v1.7.5 (#66 | 04/11/2026 12:55): 7,466,028 bytes | SHA-256: 7D927EE92F55189508816B2C30E793D38C8B7ABA33E117AA9010BD636E1FA74D
+   - v1.7.6 (#67 | 04/11/2026 13:19): 7,466,628 bytes | SHA-256: A15084255081345BCC2C91EAA00612FFB9709EFC3D230DAB67091D9C69A749C1
+   - v1.7.7 (#68 | 04/11/2026 13:51): 7,467,972 bytes | SHA-256: 657DA3F59B2D5C1B336DB228F5E516D4186A357C4F5FA0FC1FE6BF7859C40061
+================================================================================
+
+================================================================================
+AUDITORÍA DE TIEMPO Y SESIÓN (04/11/2026):
+- Ventana temporal de actividad: 11:53:34 - 15:11:00 (Duración: ~3h 17m continuos).
+- Compilaciones entregadas: 4 builds (#65 a #68 / v1.7.4 - v1.7.7).
+- Hitos completados: Recorte virtual no destructivo, sonda de duración sin límite de 180s, hot-reload en ExoPlayer, interruptor On/Off individual y consolidación en 7 fases del proyecto.
+================================================================================
+
+- Desglose de telemetría de procesamiento IA (04/11/2026):
+  * Tiempo activo de computación IA (pensamiento, edición de código y compilaciones Gradle): 50.0 minutos (25.2% del tiempo total).
+  * Tiempo de espera pasiva (pruebas en móvil por el usuario, escucha y redacción): 148.6 minutos (74.8% del tiempo total).
+  * Total sesión: 198.6 minutos (~3h 18m).
+================================================================================
+
+- Auditoría de Consumo de Tokens y Coste API (Gemini 3.8 Flash) en la sesión del 04/11/2026:
+  * Llamadas procesadas: 351 pasos / interacciones.
+  * Tokens de Entrada directa (no cacheados): 2,065,177 tokens.
+  * Tokens de Context Caching (cache read): 47,849,189 tokens (95.9% de tasa de caché).
+  * Tokens de Salida (pensamiento y generación): 209,253 tokens.
+  * Volumen total de contexto evaluado: 49,914,366 tokens.
+  * Coste real con Context Caching (tarifa vigente $0.75/$0.075/$3.75 por 1M): $5.92 USD (~5.63 EUR).
+  * Ahorro por Context Caching vs procesamiento bruto: 84.5% ($32.30 USD ahorrados).
+================================================================================
+
+- Comando /usage ejecutado (04/11/2026 15:17):
+  * Ventana de contexto activa: ~33,066 tokens (Caché: 30,015 | Input: 3,051).
+  * Consumo global de la conversación: 111,844,280 tokens procesados acumulados.
+  * Almacenamiento histórico de APKs: 70 compilaciones (456.10 MB en versions/).
+================================================================================
+
+- Consulta de contraste tarifario Gemini 3.8 Flash (04/11/2026 16:03):
+  * Verificación de tarifas oficiales vigentes de Gemini 3.8 Flash ($0.75/$0.075/$3.75 por 1M).
+  * Explicación del impacto del 95.9% de ratio de caché que permite procesar 49.9M tokens por solo $5.92 USD.
+================================================================================
+
+================================================================================
+INCIDENCIA CRÍTICA REPORTADA (05/11/2026 10:49):
+- Reporte usuario: Fallo al añadir la canción #22 tras 3 intentos (silencioso sin error) y desaparición de las 12 canciones más escuchadas en el 4º intento.
+- Diagnóstico técnico preliminar:
+  1. Bloqueo en handleFilesSelect por falta de reseteo en input.value (impide re-disparar evento change) y timeout síncrono de 5s en fetch('/api/songs').
+  2. Flag _libraryTableDirty no invalidado forzadamente, impidiendo refresco visual de la tabla.
+  3. Desaparición visual/datos de las 12 canciones del repertorio original por:
+     a) Posible activación de filtro 'Sin escuchar' (unplayed) que oculta temas con playCount > 0.
+     b) Clamping residual destructivo de playCount (Math.ceil(totalMins/4)).
+     c) Desincronización en IndexedDB entre canciones nativas y locales.
+- Plan de rescate y blindaje inmediato para v1.7.8 (Compilación #69).
+================================================================================
+
+
+================================================================================
+RESOLUCIÓN Y LANZAMIENTO OFICIAL v1.7.8 (05/11/2026):
+- Versión: 1.7.8 | Código de versión: 20 | Compilación: #69
+- Archivos generados:
+  * SpotiLocal.apk (Raíz del proyecto)
+  * SpotiLocal_v1.7.8.apk (Raíz del proyecto)
+  * versions/SpotiLocal_v1.7.8_recovery_engine.apk (Catálogo local #69)
+  * Tamaño: 7,470,856 bytes | SHA-256: 3E35241FB9D2C122FED2D43C38EAA23724CC9846ED9B3EF42EA94466D895C1E2
+- Correcciones implementadas y verificadas:
+  1. Motor de Auto-Recuperación de Biblioteca (CANONICAL_PRESET_SONGS & repairAndRecoverLibrary):
+     * Detección y reconstrucción automática al iniciar la app de las 12 canciones canónicas de SpotiLocal en caso de ausencia en memoria/IndexedDB.
+     * Re-vinculación transparente a los audioBlobs locales persistentes en 'song_blobs'.
+     * Recalculo y restauración de minutos reales y número de reproducciones cruzando registros históricos de 'spotilocal_listening_logs'.
+     * Botón explícito en Ajustes: 'Reparar y Restaurar Biblioteca 🛠️'.
+  2. Eliminación de la fórmula destructiva de playCount:
+     * Supresión definitiva de Math.ceil(totalMins / 4) en loadSongsFromDB (líneas ~1305 y ~1416 de app.js).
+  3. Blindaje del motor de subida de canciones locales (handleFilesSelect):
+     * Reseteo inmediato de input.value en selectores de archivo tras cada subida, permitiendo re-selecciones instantáneas.
+     * Eliminación de la llamada de red bloqueante (timeout reducido de 5s a 1.5s asíncrono).
+     * Inserción en memoria inmediata (0ms) con refresco forzado (_libraryTableDirty = true) y reseteo de filtro a 'all'.
+     * Notificación toast de confirmación visual: 'Añadiendo canción...' -> '¡Canción añadida con éxito! 🎵'.
+================================================================================
+
+
+================================================================================
+RESOLUCIÓN Y LANZAMIENTO OFICIAL v1.7.9 (05/11/2026):
+- Versión: 1.7.9 | Código de versión: 21 | Compilación: #70
+- Archivos generados:
+  * SpotiLocal.apk (Raíz del proyecto)
+  * SpotiLocal_v1.7.9.apk (Raíz del proyecto)
+  * versions/SpotiLocal_v1.7.9_forensic_rescue.apk (Catálogo local #70)
+  * Tamaño: 7,472,832 bytes | SHA-256: 3306FBAA7037B60C22ACEF3D9261AAE3EDC27662D868F49A5C98226DDBE5EE44
+- Correcciones y Sistema de Rescate Forense Profundo:
+  1. Escaneo Forense de 5 Vías para recuperación total de pistas piratas/locales:
+     * Vía A: Extracción masiva de blobs huérfanos desde el almacén 'song_blobs' en IndexedDB (getAllBlobRecords). Parseo de etiquetas ID3 incrustadas y nombres originales.
+     * Vía B: Rastreo de 'spotilocal_listening_logs' para recuperar identificadores de canciones perdidas y reconstruir su registro.
+     * Vía C: Rastreo del almacenamiento nativo en disco (NativeAudioStore.listFiles / listLocalAudioFiles).
+     * Vía D: Sincronización de 'spotilocal_cached_songs' de localStorage.
+     * Vía E: Verificación del catálogo canónico de 12 temas de repertorio.
+  2. Re-vinculación cruzada de estadísticas históricas:
+     * Minutos acumulados reales y conteo de reproducciones reasignados por ID o título normalizado.
+  3. Control manual en interfaz (Ajustes):
+     * Botón: '🔍 Escaneo Forense Profundo (Recuperar TODO)'.
+================================================================================
+
+
+================================================================================
+RESOLUCIÓN Y LANZAMIENTO OFICIAL v1.8.0 (05/11/2026):
+- Versión: 1.8.0 | Código de versión: 22 | Compilación: #71
+- Archivos generados:
+  * SpotiLocal.apk (Raíz del proyecto)
+  * SpotiLocal_v1.8.0.apk (Raíz del proyecto)
+  * versions/SpotiLocal_v1.8.0_metadata_and_deletion_shield.apk (Catálogo local #71)
+  * Tamaño: 7,475,904 bytes | SHA-256: 56B221B49BC84EB082A64994F4F0A651880FF393B1903144175EEF76EA4B31D0
+- Correcciones y Escudo de Metadatos y Borrado Definitivo:
+  1. Re-Enriquecimiento Automático de Metadatos y Carátulas (reEnrichSongMetadata):
+     * Detección y curación activa de temas dañados con títulos genéricos ("Canción Histórica", "Canción Recuperada", "Tema Local").
+     * Parseo directo de etiquetas ID3 (TIT2, TPE1, TALB) y carátulas incrustadas (APIC) desde los blobs de audio en 'song_blobs' con buffer expandido a 1MB y soporte nativo de Blobs sin propiedad .name.
+     * Vinculación inmediata con 'CANONICAL_PRESET_SONGS' y 'DEFAULT_COVER_CATALOG' para restablecer los títulos canónicos, artistas, álbumes y portadas en alta definición de las 12 canciones de repertorio.
+     * Invocación de 'hydrateCoverArt' para persistencia local de portadas.
+  2. Escudo Permanente de Borrado y Supresión de Resurrección Fantasma:
+     * Implementación de lista negra persistente ('spotilocal_deleted_song_ids' en localStorage y 'deleted_song_ids' en musicDB.settings).
+     * Funciones getDeletedSongIds, markSongAsDeleted, isSongDeleted y unmarkSongAsDeleted.
+     * Refactorización de deleteSong(id): marca permanente en lista negra, purga atómica de 'songs' y 'song_blobs' en IndexedDB, eliminación en memoria y actualización inmediata de 'spotilocal_cached_songs' sin re-ejecutar bucles de recuperación.
+     * Blindaje en repairAndRecoverLibrary y loadSongsFromDB: omisión estricta de cualquier pista marcada en lista negra a través de las 5 vías de rescate.
+  3. Desactivación de la Auto-Recuperación Intrusiva en Inicio:
+     * Supresión del disparador descontrolado (hasMissingPresets || songs.length < 22 || totalLogsCount > 0).
+     * La recuperación forense automática solo se dispara si la biblioteca está 100% vacía (songs.length === 0); si hay canciones, ejecuta reEnrichSongMetadata en segundo plano sin resucitar nada.
+================================================================================
+
+
+================================================================================
+RESOLUCIÓN Y LANZAMIENTO OFICIAL v1.8.1 (05/11/2026):
+- Versión: 1.8.1 | Código de versión: 23 | Compilación: #72
+- Archivos generados:
+  * SpotiLocal.apk (Raíz del proyecto)
+  * SpotiLocal_v1.8.1.apk (Raíz del proyecto)
+  * versions/SpotiLocal_v1.8.1_universal_metadata_healer.apk (Catálogo local #72)
+  * Tamaño: 7,478,664 bytes | SHA-256: 0EBC8E81B01185EEF585E9B28429581E5FE01545A57E86168C31EEFCDA07EC23
+- Diagnóstico de la Causa en v1.8.0 y Solución de Triple Vía Implementada:
+  1. Causa Raíz de la No-Restauración en v1.8.0:
+     * Detección Unicode estricta fallida: 'isGenericTitle' evaluaba 'Canción Histórica' de forma sensible a tildes y mayúsculas/minúsculas. Si el dispositivo almacenaba 'cancion historica' (sin tilde o minúsculas), la condición no se cumplía.
+     * Parser limitado: Si los archivos eran FLAC nativos ('fLaC'), ID3v1 o MP3 sin cabecera ID3v2, el parser devolvía 'Canción' y el enriquecedor lo descartaba.
+     * Ejecución asíncrona descolgada: 'reEnrichSongMetadata' se invocaba sin 'await' en segundo plano, por lo que la vista se renderizaba antes de que se completara.
+  2. Parser Universal de Audio Multiformato (id3-parser.js):
+     * Soporte nativo y extracción de metadatos Vorbis Comment (TITLE, ARTIST, ALBUM, YEAR, GENRE) y PICTURE block en archivos FLAC ('fLaC').
+     * Soporte de lectura de ID3v2 con buffer expandido dinámicamente hasta 8MB para portadas de alta resolución.
+     * Soporte de ID3v1 en los últimos 128 bytes del archivo para audios clásicos.
+  3. Matriz de Identificación por Tamaño de Archivo (CANONICAL_PRESET_BY_SIZE):
+     * Identificación matemática de las 12 canciones de repertorio comparando el tamaño exacto en bytes de los Blobs de audio almacenados en 'song_blobs' (ej. 10,245,164 bytes = Back in Black, 11,883,941 bytes = The Winner Takes It All).
+     * Mapeo y descarga forzada de carátulas desde 'DEFAULT_COVER_CATALOG' y 'getMappedCoverUrl'.
+  4. Sincronización Bloqueante al Inicio y Botón Manual en Ajustes:
+     * 'await reEnrichSongMetadata()' se ejecuta de forma síncrona en el arranque antes del pintado final.
+     * Nuevo botón en Ajustes: '✨ Restaurar Títulos y Carátulas' (reEnrichSongMetadataUI) con notificación toast explicativa del recuento de canciones sanadas.
+================================================================================
+
+================================================================================
+RESOLUCIÓN Y LANZAMIENTO OFICIAL v1.8.2 (05/11/2026):
+- Versión: 1.8.2 | Código de versión: 24 | Compilación: #73
+- Archivos generados:
+  * SpotiLocal.apk (Raíz del proyecto)
+  * SpotiLocal_v1.8.2.apk (Raíz del proyecto)
+  * versions/SpotiLocal_v1.8.2_cover_art_guarantee.apk (Catálogo local #73)
+  * Tamaño: 7,482,136 bytes | SHA-256: 2B80947B5C013B7D448359536D9D7B6CE3A086029055584C78671F4525B6998D
+- Diagnóstico Forense y Causa Raíz de Carátulas No Visibles en v1.8.1:
+  1. El Bug de Serialización '{}' en Blobs de Carátulas:
+     * Al guardar en localStorage (spotilocal_cached_songs), los objetos Blob se serializan como {} (objeto vacío).
+     * En JavaScript, {} es 'truthy', lo que hacía que !song.coverBlob evaluara a false.
+     * reEnrichSongMetadata creía que la canción ya tenía carátula asignada y saltaba el bloque de extracción de audio blobs.
+     * Al renderizar, song.coverBlob instanceof Blob evaluaba a false, mostrando la carátula genérica gris.
+     * Al pulsar el botón manual, enrichedCount era 0 y el toast reportaba falsamente: "Todas las canciones activas ya tienen sus datos asignados".
+  2. Omisión de la Bandera 'changed' en Mapeo de Carátulas:
+     * Cuando se asignaba song.coverUrl desde el catálogo de repertorio, no se marcaba changed = true, por lo que IndexedDB nunca persistía el cambio.
+- Solución Integral de Garantía de Carátulas en v1.8.2:
+  1. Saneamiento Profundo de Memoria y Caché:
+     * Tanto en loadSongsFromDB como en reEnrichSongMetadata, cualquier song.coverBlob que no sea instancia real de Blob o File se limpia a null.
+     * Las comprobaciones se blindan con !(song.coverBlob instanceof Blob) && !(song.coverBlob instanceof File).
+     * saveCachedSongs almacena únicamente coverUrl y omite serializar coverBlob a JSON.
+  2. Extracción Universal Robusta de Carátulas en 'id3-parser.js':
+     * Escaneo de firmas mágicas binarias para imágenes incrustadas: JPEG (FF D8 FF), PNG (89 50 4E 47), WebP (RIFF...WEBP) y GIF (GIF8), resolviendo cualquier discrepancia de alineamiento de bytes o cadenas MIME corruptas.
+     * Soporte de lectura de imágenes en MP3 (ID3v2.2 PIC, ID3v2.3/v2.4 APIC), FLAC (PICTURE block tipo 6) y contenedores M4A/MP4 (átomo 'covr').
+     * Límite de extracción ampliado a 32MB para portadas de ultra alta fidelidad.
+  3. Selector de Carátula de Galería y Buscador Online en Modal 'Editar Canción':
+     * Previsualización en tiempo real de la portada en el modal de edición (#edit-cover-preview).
+     * Botón 'Elegir de galería' (#btn-edit-pick-cover) para subir cualquier fotografía o imagen desde el almacenamiento local del teléfono.
+     * Botón 'Buscar carátula online' (#btn-edit-fetch-cover) conectado a la API de iTunes para descargar automáticamente carátulas de 600x600px con un solo toque.
+  4. Invalidación de Caché de ObjectURLs (coverObjectUrlCache):
+     * Borrado explícito de URLs cacheadas al actualizar portadas para refresco visual instantáneo en lista, barra de reproducción, reproductor expandido y letras.
+================================================================================
+
+ACTUALIZACIÓN CRÍTICA RE-EMPAQUETADA v1.8.2 (05/11/2026 - 13:58):
+- Versión: 1.8.2 | Código de versión: 24 | Compilación: #73 (Rehecha)
+- Archivos generados:
+  * SpotiLocal.apk (Raíz del proyecto)
+  * SpotiLocal_v1.8.2.apk (Raíz del proyecto)
+  * versions/SpotiLocal_v1.8.2_cover_art_guarantee.apk (Catálogo local #73)
+  * Tamaño: 7,483,616 bytes | SHA-256: D3BF99DDEACB9A7B9F9EDA244A1D84EA2ECDE671C3217D80E02C5D981FD2CD30
+- Diagnóstico Forense y Corrección de Restauración de TÍTULOS:
+  1. Causa Raíz de Títulos No Restaurados:
+     * En 'id3-parser.js', la cabecera mágica de ID3v1 comprobaba '0x37' ('7') en lugar de '0x47' ('G'), inutilizando completamente la lectura de tags ID3v1 al final de los archivos.
+     * En frames de texto con codificación UTF-16 con BOM (encoding 1), los audios en Big Endian se decodificaban como caracteres chinos corruptos.
+     * En 'ID3Parser.parse', si ID3v2 contenía carátula APIC pero no TIT2, retornaba inmediatamente sin fusionar el tag ID3v1, perdiendo el título.
+     * En 'app.js', si una canción recuperada de logs no tenía blob físico vinculado (por ser streaming de repertorio local), no se reasignaba el título canónico y quedaba bloqueada como "Canción Histórica (xxxxxx)".
+  2. Solución Definitiva de Restauración de Títulos:
+     * Corrección a '0x47' ('TAG') en parser ID3v1.
+     * Decodificador de texto multi-encoding nativo con TextDecoder para UTF-8, Latin1, UTF-16LE y UTF-16BE automático sin corrupción.
+     * Fusión inteligente ID3v2 + ID3v1: si v2 tiene carátula y v1 tiene título, se combinan ambos.
+     * Auto-Sanador de Repertorio Canónico: Cualquier canción que aún mantenga título genérico ("Canción Histórica...", "Tema Local...", etc.) se vincula automáticamente con los presets canónicos no asignados (The Winner Takes It All, Back in Black, etc.), restaurando título, artista, álbum, audioUrl y coverUrl.
+     * Vinculación profunda de blobs huérfanos: si una canción genérica carece de blob, se busca en 'blobRecords' cualquier audioBlob no vinculado para restaurar su metadata ID3.
+================================================================================
+
+ACTUALIZACIÓN CRÍTICA FORENSE v1.8.3 (05/11/2026 - 14:21):
+- Versión: 1.8.3 | Código de versión: 25 | Compilación: #74
+- Archivos generados:
+  * SpotiLocal.apk (Raíz del proyecto)
+  * SpotiLocal_v1.8.3.apk (Raíz del proyecto)
+  * versions/SpotiLocal_v1.8.3_native_recovery.apk (Catálogo local #74)
+  * Tamaño: 7,488,928 bytes | SHA-256: E9E0BA496A25176B8922884FF1F7A243170BB50F218A82B9101073C98F64C767
+- Diagnóstico Forense y Solución Definitiva de Recuperación:
+  1. Integración de Puente Nativo con NativeAudioStore:
+     * Descubrimiento: Las canciones recuperadas desde los logs de reproducción carecían de blob en IndexedDB ('song_blobs'), por lo que el parser ID3 nunca recibía datos que analizar.
+     * Implementación en 'NativeAudioStore.java' y 'NativePlayerBridge.java':
+       - 'findAudioFile(context, mediaId)': Localiza el archivo de audio real en 'files/native-audio/' por SHA-256(song.id) independientemente de la extensión.
+       - 'readRange(file, offset, length)' y 'readRangeBase64': Lectura segura por tramos de hasta 2MB mediante RandomAccessFile.
+       - '@JavascriptInterface getLocalAudioInfo(mediaId)': Informa de presencia física, nombre y tamaño del audio nativo.
+       - '@JavascriptInterface readLocalAudioRange(mediaId, offset, length)': Transfiere los bytes del audio al WebView en Base64.
+  2. Motor de Reconstrucción de Blobs y Extracción ID3 ('app.js'):
+     * Nueva función 'getBlobFromAnySource(song)': Escaneo en cascada de memoria -> IndexedDB ('musicDB.getAudioBlob') -> almacenamiento nativo Android ('readLocalAudioRange').
+     * Persistencia bidireccional: Al recuperar el audio de 'native-audio', se reconstruye el Blob y se persiste de vuelta en IndexedDB ('song_blobs') garantizando permanencia offline.
+     * Extracción determinista de metadatos:
+       - Identificación canónica por tamaño exacto ('CANONICAL_PRESET_BY_SIZE').
+       - Parser multinivel ID3v2/FLAC/M4A/ID3v1 sobre el blob nativo con extracción de título, artista, álbum y portada 'coverBlob'.
+  3. Eliminación Total de Adivinación (Block F eliminado):
+     * Eliminado por completo el auto-sanador por orden de array que asignaba títulos de canciones canónicas a temas subidos por el usuario.
+     * Las pistas que carecen de archivo se marcan con 'needsReview: true' y la insignia visible "Sin identificar" en la tabla, con acceso directo al modal de edición y búsqueda de carátulas en iTunes.
+  4. Panel de Diagnóstico Forense en Ajustes:
+     * Botón '🔍 Diagnóstico de biblioteca' en Ajustes que genera un informe completo (canción por canción, presencia de blob en IndexedDB, presencia de archivo en 'native-audio', tamaño en bytes, estado de carátula y huérfanos).
+     * Botón de copiado en un toque al portapapeles.
+  5. Invalidación de Caché PWA / WebView:
+     * 'sw.js': Incremento de CACHE_NAME a 'spotipirata-pwa-v161' con estrategia Network-First para navegación HTML ('index.html').
+     * 'index.html': Script tags actualizados con version query string '?v=1.8.3'.
+================================================================================
+
+VERIFICACIÓN EXITOSA DE USUARIO (05/11/2026 - 14:23):
+- El usuario confirma en su dispositivo físico que la recuperación de títulos y carátulas funciona correctamente con SpotiLocal v1.8.3 (Build #74).
+- Las canciones recuperadas han restaurado sus nombres reales y carátulas originales desde el almacenamiento nativo hacia IndexedDB.
+================================================================================
+
+ACTUALIZACIÓN CRÍTICA FORENSE v1.8.4 (07/11/2026 - 19:55):
+- Versión: 1.8.4 | Código de versión: 26 | Compilación: #75
+- Archivos generados:
+  * SpotiLocal.apk (Raíz del proyecto)
+  * SpotiLocal_v1.8.4.apk (Raíz del proyecto)
+  * versions/SpotiLocal_v1.8.4_stats_trim_gain30db.apk (Catálogo local #75)
+  * Tamaño: 7,499,840 bytes | SHA-256: C2757C477B5B6B611CAB16D8C0EF5069AE35908B99B3DB6885AD5DE65E154C61
+- Diagnóstico Forense y Solución Integral:
+  1. Blindaje y Recuperación Definitiva de Estadísticas de Escucha:
+     * Causa Raíz: El tope FIFO de 10.000 micro-registros (de 3-5s) truncaba el historial a ~13,9 horas (50.000s), y 'globalTotalSeconds' en IndexedDB jamás era consultado por 'getStatsIndex()'. Además, borrar temas restaba tiempo del Total Histórico y 'restoreListeningLogsFromDB()' se ejecutaba sin 'await'.
+     * Solución:
+       - Implementado algoritmo 'coalesceListeningLogs' que fusiona ticks continuos de la misma canción en ventanas de hasta 15 min y bloques de 1 hora, elevando la retención a 25.000 bloques (~6.250+ horas reales) y archivando excedentes en 'spotilocal_archived_secs'.
+       - 'getStatsIndex()' reconcilia alias de IDs antiguos ('folder_...'), suma de playlists, contadores de canciones y 'globalTotalSeconds' persistente.
+       - En 'deleteSong', los acumulados históricos y anuales se bloquean en 'settings' antes de eliminar la pista, garantizando que borrar canciones nunca decrezca el tiempo total.
+       - Añadida tarjeta en Ajustes "📊 Registro de Horas y Estadísticas" con auditoría en vivo y control opcional para fijar un suelo histórico en horas ('applyHistoricalHoursFloorUI').
+  2. Reparación e Integración del Sistema de Recortes ("Recortes") con v1.8.x:
+     * Causa Raíz: La columna de acciones (.col-actions) en escritorio estaba limitada a 80px para 7 botones (~240px), recortando el botón '✂️'. ExoPlayer devolvía la longitud recortada en 'durationMs', corrompiendo 'song.duration', rompiendo '📍 Aquí' y bloqueando la preescucha. 'btnAutoDetectSilence' truncaba a 10MB y 'saveCachedSongs' descartaba recortes en 6 puntos.
+     * Solución:
+       - Grid de escritorio ampliado a 236px y acciones móviles optimizadas con '✂️' siempre visible.
+       - Separación estricta de 'rawDuration' inmutable (obtenida por 'MediaMetadataRetriever' en 2ms o Audio probe sobre 'getBlobFromAnySource') frente a la duración visual recortada.
+       - 'getPlaybackCurrentTime()' calcula posición absoluta 'clipStartMs + positionMs', haciendo que '📍 Aquí' y las letras '.lrc' sincronicen con precisión milimétrica.
+       - Preescucha sin recorte ('previewSongAtUnclippedTime') para probar cualquier punto de la onda o inicio/fin fuera del clip previo, con playhead vivo '#trim-playhead' en tiempo real.
+       - 'btnAutoDetectSilence' escanea archivos completos de hasta 45MB sin truncado artificial de 10MB.
+       - 'saveCachedSongs' unificado en los 6 puntos de guardado preservando recortes, ganancias y duración.
+  3. Ampliación de Ganancia de Sonido por Canción a ±30 dB (Nivelador):
+     * Tarjeta de Nivelador de Sonido desacoplada de '#trim-controls-container', permitiendo nivelar volumen aunque el recorte de tiempo esté desactivado.
+     * Rango ampliado de -30 dB a +30 dB con slider continuo y botones rápidos de precisión (-1 dB, 0 dB, +1 dB).
+     * En Android Native: Integrado 'android.media.audiofx.LoudnessEnhancer' para boost real de hasta +3000 mB (+30 dB) y atenuación lineal para valores negativos (≤0 dB), auto-aplicado por canción al cambiar de pista en segundo plano.
+     * En Web/PWA: Integrado limitador transparente 'DynamicsCompressorNode' (-1.0 dB ceiling) y 'GainNode' hasta 32.0x (+30 dB).
+     * Respuesta en tiempo real instantánea mientras se arrastra el deslizador en reproducción activa.
+  4. Invalidación de Caché y Empaquetado:
+     * 'sw.js' CACHE_NAME incrementado a 'spotipirata-pwa-v162'.
+     * Paridad SHA-256 byte a byte verificada al 100% entre raíz y assets del APK nativo.
+================================================================================
+
+

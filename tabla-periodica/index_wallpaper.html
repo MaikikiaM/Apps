@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Tabla Periódica Neón OLED (Wallpaper Engine)</title>
+  <meta name="description" content="Fondo de pantalla interactivo para Wallpaper Engine de la Tabla Periódica con margen para iconos y brillo Neón vívido.">
+  <link rel="stylesheet" href="styles_wallpaper.css">
+</head>
+<body>
+  <div class="bg-canvas"></div>
+
+  <div class="wallpaper-container" id="wallpaperContainer">
+    <!-- Main Table Grid (18 cols x 7 rows) -->
+    <div class="main-grid" id="mainGrid">
+      <div class="table-legend" id="tableLegend"></div>
+    </div>
+
+    <!-- Spacer & Connector SVG Container -->
+    <div class="connector-area">
+      <svg id="svgConnectors" class="svg-connectors">
+        <path id="connectorPath" stroke="#607d8b" stroke-width="1.5" stroke-dasharray="3 3" fill="none" opacity="0.85"/>
+      </svg>
+    </div>
+
+    <!-- Bottom F-Block Grid (18 cols x 2 rows) -->
+    <div class="fblock-grid" id="fblockGrid"></div>
+  </div>
+
+  <!-- Interactive Square Atom Bohr Orbit Modal Overlay -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal-container" id="modalContainer">
+      <button class="close-btn" id="closeModalBtn" title="Cerrar (Esc)">✕</button>
+      
+      <!-- Mini Element Card (Visible while expanding and shrinking back) -->
+      <div class="modal-mini-card" id="modalMiniCard">
+        <div class="atomic-num" id="miniNum">1</div>
+        <div class="symbol" id="miniSymbol">H</div>
+        <div class="name" id="miniName">Hidrógeno</div>
+        <div class="mass" id="miniMass">1.008</div>
+      </div>
+
+      <!-- Full Expanded Detail Content (Left Square) -->
+      <div class="modal-square-content">
+        <!-- Top Header Info -->
+        <div class="details-header">
+          <div class="header-left">
+            <div class="modal-symbol" id="modalSymbol">H</div>
+            <div class="modal-title-group">
+              <h2 id="modalName">Hidrógeno</h2>
+              <p id="modalCfg">1s¹</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Center Stage: Bohr Atomic Orbits with Interactive Clickable Nucleus -->
+        <div class="atom-stage-square" id="atomStage">
+          <canvas id="atomCanvas" class="atom-canvas"></canvas>
+          <div class="nucleus-target" id="nucleusTarget" title="Ver curiosidades del elemento">
+            <div class="nucleus-pulse-ring"></div>
+          </div>
+        </div>
+
+        <!-- Bottom Footer Grid -->
+        <div class="details-footer-grid">
+          <div class="info-card-small">
+            <label>Nº Atómico</label>
+            <value id="modalNum">1</value>
+          </div>
+          <div class="info-card-small">
+            <label>Masa Atómica</label>
+            <value id="modalMass">1.008 u</value>
+          </div>
+          <div class="info-card-small">
+            <label>Categoría</label>
+            <value id="modalCat">No Metales</value>
+          </div>
+        </div>
+      </div>
+
+      <!-- Side Fun Fact Panel (Extends to the right) -->
+      <div class="side-fact-panel" id="sideFactPanel">
+        <div class="fact-card-inner">
+          <div class="fact-header">
+            <span class="fact-badge">💡 HISTORIA Y PROPIEDADES</span>
+            <span class="fact-watermark" id="factWatermark">H</span>
+          </div>
+
+          <div class="fact-body">
+            <p id="factText" class="fact-text">Es el elemento más abundante del universo.</p>
+          </div>
+
+          <div class="fact-footer-stats">
+            <div class="stat-pill">
+              <span class="stat-label">ESTADO NATURAL</span>
+              <span class="stat-val" id="factState">Gas (25°C)</span>
+            </div>
+            <div class="stat-pill">
+              <span class="stat-label">CLASIFICACIÓN</span>
+              <span class="stat-val" id="factGroupVal">Otros No Metales</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="elementsData.js"></script>
+  <script src="app_wallpaper.js"></script>
+</body>
+</html>
