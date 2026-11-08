@@ -1,7 +1,7 @@
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-$baseDir = "c:\Users\migue\Antigravity\SpotiLocal"
+$baseDir = if ($PSScriptRoot) { $PSScriptRoot } else { "C:\Users\migue\Antigravity\Apps\spotilocal" }
 $apkSrc = "$baseDir\apk-build\android\app\build\outputs\apk\debug\app-debug.apk"
 $apkDest = "$baseDir\SpotiPirata_v1.3.apk"
 
