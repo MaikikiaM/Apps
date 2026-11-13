@@ -346,7 +346,11 @@ async function initSpotiLocalApp() {
     link.click();
   };
 
-  const CURRENT_APP_VERSION = "1.8.4";
+  const CURRENT_APP_VERSION = "1.8.7";
+
+  if (typeof navigator !== "undefined" && navigator.storage && typeof navigator.storage.persist === "function") {
+    navigator.storage.persist().catch(() => {});
+  }
 
   window.checkForUpdates = async function(manual = true) {
     const statusEl = document.getElementById("update-status-lbl");
@@ -509,42 +513,180 @@ async function initSpotiLocalApp() {
 
   window.clearDatabase = async function() {
     if (confirm("⚠️ ¿Deseas borrar toda tu biblioteca de canciones, listas y estadísticas locales?")) {
+      isPlaying = false;
+      currentSongIndex = -1;
+      currentQueue = [];
+      unshuffledQueue = [];
+      pendingQueue = [];
       try {
-        if (typeof musicDB !== "undefined" && musicDB.clearAllSongs) {
-          await musicDB.clearAllSongs();
+        if (audioElement) {
+          audioElement.pause();
+          audioElement.removeAttribute("src");
+          if (typeof audioElement.load === "function") audioElement.load();
+        }
+      } catch (e) {}
+      if (currentAudioObjectUrl) {
+        try { URL.revokeObjectURL(currentAudioObjectUrl); } catch (e) {}
+        currentAudioObjectUrl = null;
+      }
+      try {
+        const np = window.SpotiLocalNativePlayer;
+        if (np) {
+          if (typeof np.stop === "function") np.stop();
+          else if (typeof np.pause === "function") np.pause();
+          if (typeof np.clearAllLocalAudio === "function") np.clearAllLocalAudio();
+        }
+      } catch (e) {}
+      try {
+        if (typeof musicDB !== "undefined") {
+          if (musicDB.clearAllSongs) await musicDB.clearAllSongs();
+          if (musicDB.close) musicDB.close();
         }
       } catch(e) {}
-      localStorage.removeItem("spotilocal_listening_logs");
-      localStorage.removeItem("spotilocal_playlists");
-      const req = indexedDB.deleteDatabase("SpotiLocalDB");
-      req.onsuccess = () => location.reload();
-      setTimeout(() => location.reload(), 500);
+      _songStatsLedgerCache = { canonical: {}, bySongId: {} };
+      _listeningLogsCache = null;
+      if (Array.isArray(_unappliedNativeStats)) _unappliedNativeStats.length = 0;
+      [
+        "spotilocal_listening_logs",
+        "spotilocal_playlists",
+        "spotilocal_cached_songs",
+        "spotilocal_song_ledger_v2",
+        "spotilocal_deleted_song_ids",
+        "spotilocal_archived_secs",
+        "spotilocal_unapplied_native_stats"
+      ].forEach(k => { try { localStorage.removeItem(k); } catch(e) {} });
+      try {
+        if (window.SpotiLocalNativePlayer && typeof window.SpotiLocalNativePlayer.saveDurableBackup === "function") {
+          window.SpotiLocalNativePlayer.saveDurableBackup(JSON.stringify({
+            version: 2,
+            updatedAt: Date.now(),
+            explicitlyCleared: true,
+            songs: [],
+            playlists: [],
+            lyrics: {},
+            listeningLogs: [],
+            songStatsLedgerV2: { canonical: {}, bySongId: {} },
+            deletedSongIds: [],
+            archivedHistorySeconds: 0
+          }));
+        }
+      } catch(e) {}
+      const triggerReload = () => {
+        try {
+          if (typeof location !== "undefined" && typeof location.reload === "function") {
+            location.reload();
+          }
+        } catch (e) {}
+      };
+      try {
+        if (typeof indexedDB !== "undefined" && typeof indexedDB.deleteDatabase === "function") {
+          const req = indexedDB.deleteDatabase("SpotiLocalDB");
+          if (req && typeof req === "object") {
+            req.onsuccess = triggerReload;
+            req.onerror = triggerReload;
+            req.onblocked = triggerReload;
+          }
+        }
+      } catch (e) {}
+      setTimeout(triggerReload, 500);
     }
   };
 
   window.exportDatabase = async function() {
+    let allLyrics = {};
+    try {
+      if (typeof musicDB !== "undefined" && musicDB.getAllLyrics) {
+        allLyrics = await musicDB.getAllLyrics();
+      }
+    } catch (e) {}
+    const archivedSecs = parseFloat(localStorage.getItem("spotilocal_archived_secs") || "0") || 0;
+    const deletedIds = (typeof getDeletedSongIds === "function") ? Array.from(getDeletedSongIds()) : [];
     const exportData = {
+      version: 2,
+      exportedAt: new Date().toISOString(),
+      appVersion: CURRENT_APP_VERSION,
       songs: (songs || []).map(s => {
         const lst = (typeof getSongLedgerStats === "function") ? getSongLedgerStats(s) : null;
         return {
+          id: s.id,
           title: s.title,
           artist: s.artist,
           album: s.album,
-          isLiked: s.isLiked,
+          year: s.year,
+          genre: s.genre,
+          audioUrl: s.audioUrl || null,
+          coverUrl: s.coverUrl || null,
+          isLiked: Boolean(s.isLiked),
           playCount: Math.max(s.playCount || 0, (lst ? lst.playCount : 0)),
-          totalTimeListened: Math.max(s.totalTimeListened || 0, (lst ? lst.totalTimeListened : 0))
+          totalTimeListened: Math.max(s.totalTimeListened || 0, (lst ? lst.totalTimeListened : 0)),
+          dateAdded: s.dateAdded || 0,
+          duration: s.duration || 0,
+          rawDuration: s.rawDuration || s.duration || 0,
+          trimStart: typeof s.trimStart === "number" ? s.trimStart : 0,
+          trimEnd: typeof s.trimEnd === "number" ? s.trimEnd : 0,
+          trimEnabled: s.trimEnabled !== false,
+          skipSegments: Array.isArray(s.skipSegments) ? s.skipSegments : [],
+          gainDb: typeof s.gainDb === "number" ? s.gainDb : 0,
+          statsIsolated: Boolean(s.statsIsolated)
         };
       }),
       playlists: playlists || [],
+      lyrics: allLyrics,
       listeningLogs: typeof getListeningLogs === "function" ? getListeningLogs() : [],
-      songStatsLedger: typeof getSongStatsLedger === "function" ? getSongStatsLedger() : null
+      songStatsLedger: typeof getSongStatsLedger === "function" ? getSongStatsLedger() : null,
+      deletedSongIds: deletedIds,
+      archivedHistorySeconds: archivedSecs
     };
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+    const jsonStr = JSON.stringify(exportData, null, 2);
+    const fileName = `SpotiLocal_Backup_${Date.now()}.json`;
+    try {
+      const np = (typeof window !== "undefined" && window.SpotiLocalNativePlayer) ? window.SpotiLocalNativePlayer : null;
+      if (np && typeof np.exportBackupToDownloads === "function") {
+        const savedLocation = np.exportBackupToDownloads(fileName, jsonStr);
+        if (savedLocation) {
+          if (typeof showToast === "function") showToast(`Copia guardada en ${savedLocation} 📄`);
+          return;
+        }
+      }
+    } catch (e) {}
+    const blob = new Blob([jsonStr], { type: "application/json" });
+    const objUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `SpotiLocal_Backup_${Date.now()}.json`;
+    a.href = objUrl;
+    a.download = fileName;
     a.click();
-    if (typeof showToast === "function") showToast("Copia de seguridad con estadísticas descargada 📄");
+    setTimeout(() => {
+      try { URL.revokeObjectURL(objUrl); } catch (e) {}
+    }, 5000);
+    if (typeof showToast === "function") showToast("Copia de seguridad completa descargada 📄");
+  };
+
+  window.importDatabase = async function(file) {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data || typeof data !== "object" || (!Array.isArray(data.songs) && !Array.isArray(data.listeningLogs) && !Array.isArray(data.playlists))) {
+        if (typeof showToast === "function") showToast("Archivo de copia de seguridad no válido ⚠️");
+        return;
+      }
+
+      if (typeof applyExternalBackupPayload === "function") {
+        await applyExternalBackupPayload(data, { allowStatsRestore: true });
+      }
+      if (typeof loadSongsFromDB === "function") {
+        await loadSongsFromDB();
+      }
+      if (typeof loadPlaylistsFromDB === "function") {
+        await loadPlaylistsFromDB();
+      }
+      if (typeof showToast === "function") {
+        showToast("Copia de seguridad restaurada correctamente ✅");
+      }
+    } catch (err) {
+      console.error("Error importing backup:", err);
+      if (typeof showToast === "function") showToast("Error al importar copia de seguridad ❌");
+    }
   };
 
   // DOM Elements
@@ -1086,8 +1228,27 @@ async function initSpotiLocalApp() {
   async function downloadAndCacheAllSongs(songList, updateButton = null) {
     if (!songList || songList.length === 0) return;
 
+    let existingBlobKeys = new Set();
+    try {
+      if (typeof musicDB !== "undefined" && musicDB.getAllBlobKeys) {
+        const keys = await musicDB.getAllBlobKeys();
+        if (Array.isArray(keys)) existingBlobKeys = new Set(keys);
+      }
+    } catch (e) {}
+
+    const songHasLocalAudio = (s) => {
+      if (!s) return false;
+      if (s.audioBlob instanceof Blob && s.audioBlob.size > 0) return true;
+      if (s.hasAudioBlob) return true;
+      if (existingBlobKeys.has(s.id)) {
+        s.hasAudioBlob = true;
+        return true;
+      }
+      return false;
+    };
+
     // Count how many actually need downloading
-    const needsDownload = songList.filter(s => (!s.audioBlob || !(s.audioBlob instanceof Blob)) && s.audioUrl);
+    const needsDownload = songList.filter(s => !songHasLocalAudio(s) && s.audioUrl);
     const totalToDownload = needsDownload.length;
 
     if (totalToDownload === 0) {
@@ -1106,7 +1267,7 @@ async function initSpotiLocalApp() {
       const song = songList[i];
 
       // Download audio Blob if not already saved in local device storage
-      if ((!song.audioBlob || !(song.audioBlob instanceof Blob)) && song.audioUrl) {
+      if (!songHasLocalAudio(song) && song.audioUrl) {
         downloadedCount++;
         if (updateButton) {
           updateButton.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Descargando ${downloadedCount}/${totalToDownload}: ${song.title || 'canción'}...`;
@@ -1124,6 +1285,7 @@ async function initSpotiLocalApp() {
               : getAudioMimeType(song.audioUrl);
             const typedBlob = new Blob([blob], { type: responseType });
             song.audioBlob = typedBlob;
+            song.hasAudioBlob = true;
             await musicDB.saveSong(song);
           }
         } catch (e) {
@@ -1132,61 +1294,14 @@ async function initSpotiLocalApp() {
       }
     }
 
+    if (typeof scheduleDurableBackup === "function") scheduleDurableBackup();
+
     if (updateButton) {
       updateButton.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#1db954;"></i> ¡${downloadedCount} canciones descargadas! 📱`;
       setTimeout(() => {
         updateButton.innerHTML = `<i class="fa-solid fa-rotate"></i> Sincronizar Música Local 🔄`;
       }, 3500);
     }
-  }
-
-  if (btnForceSync) {
-    btnForceSync.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      btnForceSync.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Conectando al PC (192.168.1.58)...`;
-      try {
-        await loadSongsFromDB((msg) => {
-          btnForceSync.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${msg}`;
-        });
-        if (songs && songs.length > 0) {
-          await downloadAndCacheAllSongs(songs, btnForceSync);
-          btnForceSync.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#1db954;"></i> ¡Música Guardada en el Móvil! 📱`;
-          setTimeout(() => {
-            btnForceSync.innerHTML = `<i class="fa-solid fa-rotate"></i> Sincronizar Música Local 🔄`;
-          }, 3500);
-        } else {
-          btnForceSync.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#ff9800;"></i> Sin respuesta del PC`;
-          setTimeout(() => {
-            btnForceSync.innerHTML = `<i class="fa-solid fa-rotate"></i> Sincronizar Música Local 🔄`;
-          }, 4000);
-        }
-      } catch (err) {
-        btnForceSync.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#ff5555;"></i> Error al conectar con PC`;
-        setTimeout(() => {
-          btnForceSync.innerHTML = `<i class="fa-solid fa-rotate"></i> Sincronizar Música Local 🔄`;
-        }, 4000);
-      }
-    });
-  }
-
-  if (btnLoadPresetRepertoire) {
-    btnLoadPresetRepertoire.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      btnLoadPresetRepertoire.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Guardando ABBA FLAC...`;
-      try {
-        await loadSongsFromDB();
-        await downloadAndCacheAllSongs(songs, btnLoadPresetRepertoire);
-      } catch (err) {
-        btnLoadPresetRepertoire.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> Cargar Repertorio Incluido 🎵`;
-      }
-    });
-  }
-
-  if (btnOpenCloudModal) {
-    btnOpenCloudModal.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      await loadSongsFromDB();
-    });
   }
 
   async function handleFilesSelect(files) {
@@ -1229,23 +1344,21 @@ async function initSpotiLocalApp() {
           year: metadata.year || "2026",
           genre: metadata.genre || "Audio Local",
           audioBlob: file,
+          hasAudioBlob: true,
           coverBlob: metadata.coverBlob || null,
           isLiked: false,
           playCount: 0,
           totalTimeListened: 0,
+          statsIsolated: true,
           dateAdded: Date.now()
         };
 
-        const ledgerStats = (typeof getSongLedgerStats === "function") ? getSongLedgerStats(songObj) : null;
-        if (ledgerStats) {
-          songObj.totalTimeListened = ledgerStats.totalTimeListened || 0;
-          songObj.playCount = ledgerStats.playCount || 0;
-        }
         if (typeof recordSongLedgerMonotonic === "function") {
-          recordSongLedgerMonotonic(songObj, 0, 0);
+          recordSongLedgerMonotonic(songObj, 0, 0, true);
         }
 
-        await musicDB.saveSong(songObj);
+        await musicDB.saveSong(songObj, { forceExactStats: true });
+        if (typeof scheduleDurableBackup === "function") scheduleDurableBackup();
 
         // Immediate in-memory registration (instant 0ms update)
         const existingIdx = songs.findIndex(s => s.id === songObj.id);
@@ -1373,28 +1486,46 @@ async function initSpotiLocalApp() {
   // PERMANENT DELETION BLACKLIST & CACHED REPOSITORY SHIELD
   // --------------------------------------------------------------------------
 
+  function pruneLegacyTitleBlacklist() {
+    try {
+      const raw = localStorage.getItem("spotilocal_deleted_song_ids");
+      if (!raw) return;
+      const list = JSON.parse(raw);
+      if (!Array.isArray(list)) return;
+      const cleaned = list
+        .map(s => String(s || "").toLowerCase().trim())
+        .filter(s => s && !s.startsWith("title_"));
+      if (cleaned.length !== list.length) {
+        localStorage.setItem("spotilocal_deleted_song_ids", JSON.stringify(cleaned));
+        if (typeof musicDB !== "undefined" && musicDB.setSetting) {
+          musicDB.setSetting("deleted_song_ids", cleaned).catch(() => {});
+        }
+      }
+    } catch (e) {}
+  }
+
   function getDeletedSongIds() {
     try {
       const raw = localStorage.getItem("spotilocal_deleted_song_ids");
       const list = raw ? JSON.parse(raw) : [];
-      return new Set(Array.isArray(list) ? list.map(s => String(s).toLowerCase().trim()) : []);
+      return new Set(
+        Array.isArray(list)
+          ? list.map(s => String(s || "").toLowerCase().trim()).filter(s => s && !s.startsWith("title_"))
+          : []
+      );
     } catch (e) {
       return new Set();
     }
   }
 
-  function markSongAsDeleted(id, title = null) {
+  function markSongAsDeleted(id, _ignoredTitle = null) {
     try {
+      if (!id) return;
       const set = getDeletedSongIds();
-      if (id) {
-        const strId = String(id).toLowerCase().trim();
-        set.add(strId);
-        if (strId.startsWith("folder_")) {
-          set.add(strId.replace(/^folder_/, ""));
-        }
-      }
-      if (title) {
-        set.add("title_" + String(title).toLowerCase().trim());
+      const strId = String(id).toLowerCase().trim();
+      set.add(strId);
+      if (strId.startsWith("folder_")) {
+        set.add(strId.replace(/^folder_/, ""));
       }
       const arr = Array.from(set);
       localStorage.setItem("spotilocal_deleted_song_ids", JSON.stringify(arr));
@@ -1404,36 +1535,25 @@ async function initSpotiLocalApp() {
     } catch (e) {}
   }
 
-  function isSongDeleted(id, title = null) {
+  function isSongDeleted(id, _ignoredTitle = null) {
     const set = getDeletedSongIds();
-    if (!set || set.size === 0) return false;
-    if (id) {
-      const strId = String(id).toLowerCase().trim();
-      if (set.has(strId)) return true;
-      if (strId.startsWith("folder_") && set.has(strId.replace(/^folder_/, ""))) return true;
-    }
-    if (title) {
-      const strTitle = "title_" + String(title).toLowerCase().trim();
-      if (set.has(strTitle)) return true;
-    }
+    if (!set || set.size === 0 || !id) return false;
+    const strId = String(id).toLowerCase().trim();
+    if (set.has(strId)) return true;
+    if (strId.startsWith("folder_") && set.has(strId.replace(/^folder_/, ""))) return true;
     return false;
   }
 
-  function unmarkSongAsDeleted(id, title = null) {
+  function unmarkSongAsDeleted(id, _ignoredTitle = null) {
     try {
+      if (!id) return;
       const set = getDeletedSongIds();
       let changed = false;
-      if (id) {
-        const strId = String(id).toLowerCase().trim();
-        if (set.has(strId)) { set.delete(strId); changed = true; }
-        if (strId.startsWith("folder_")) {
-          const raw = strId.replace(/^folder_/, "");
-          if (set.has(raw)) { set.delete(raw); changed = true; }
-        }
-      }
-      if (title) {
-        const strTitle = "title_" + String(title).toLowerCase().trim();
-        if (set.has(strTitle)) { set.delete(strTitle); changed = true; }
+      const strId = String(id).toLowerCase().trim();
+      if (set.has(strId)) { set.delete(strId); changed = true; }
+      if (strId.startsWith("folder_")) {
+        const raw = strId.replace(/^folder_/, "");
+        if (set.has(raw)) { set.delete(raw); changed = true; }
       }
       if (changed) {
         const arr = Array.from(set);
@@ -1472,7 +1592,11 @@ async function initSpotiLocalApp() {
             trimStart: typeof s.trimStart === "number" ? s.trimStart : 0,
             trimEnd: typeof s.trimEnd === "number" ? s.trimEnd : 0,
             trimEnabled: s.trimEnabled !== false,
+            skipSegments: Array.isArray(s.skipSegments) ? s.skipSegments : [],
             gainDb: typeof s.gainDb === "number" ? s.gainDb : 0,
+            hasAudioBlob: Boolean(s.hasAudioBlob || (s.audioBlob instanceof Blob)),
+            statsIsolated: Boolean(s.statsIsolated),
+            nativeFileName: s.nativeFileName || null,
             needsReview: Boolean(s.needsReview)
           };
         });
@@ -1495,6 +1619,16 @@ async function initSpotiLocalApp() {
     { size: 20797484, filename: "Zigeunerweisen - Pablo Sarasate.mp3", title: "Zigeunerweisen (Aires Gitanos)", artist: "Pablo Sarasate", album: "Classical Masterpieces", year: "1878", genre: "Clásica" }
   ];
 
+  function normalizeStrictMeta(value) {
+    return String(value || "")
+      .replace(/\.(mp3|flac|wav|ogg|m4a|aac|webm)$/i, "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
   function isGenericSongTitle(title) {
     if (!title) return true;
     const s = String(title).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
@@ -1508,43 +1642,75 @@ async function initSpotiLocalApp() {
            s === "tema" ||
            s === "pista" ||
            s === "track" ||
+           s === "sin identificar" ||
+           s === "nube cloud track" ||
+           s === "artista local" ||
+           s === "artista desconocido" ||
+           s.startsWith("sin identificar") ||
            s.includes("historica") ||
            s.includes("recuperada") ||
-           s.startsWith("cancion") ||
-           s.startsWith("tema") ||
-           s.startsWith("audio") ||
-           s.startsWith("pista") ||
-           s.startsWith("track") ||
+           s === "cancion local" ||
+           s === "cancion desconocida" ||
+           s === "cancion sin titulo" ||
+           s.startsWith("cancion sin identificar") ||
+           s === "tema local" ||
+           s === "tema desconocido" ||
+           s === "tema sin titulo" ||
+           s === "audio local" ||
+           s === "audio desconocido" ||
+           s === "pista local" ||
+           s === "pista desconocida" ||
+           s === "track local" ||
+           s === "track unknown" ||
            s.startsWith("song_") ||
            s.startsWith("folder_") ||
-           /^track\s*\d+/i.test(s) ||
-           /^pista\s*\d+/i.test(s) ||
-           /^audio\s*\d+/i.test(s);
+           /^[a-f0-9]{16,}$/i.test(s) ||
+           /^cancion\s*\d+$/i.test(s) ||
+           /^tema\s*\d+$/i.test(s) ||
+           /^track\s*\d+$/i.test(s) ||
+           /^pista\s*\d+$/i.test(s) ||
+           /^audio\s*\d+$/i.test(s);
+  }
+
+  const GENERIC_ARTIST_NAMES = new Set([
+    "",
+    "artista local",
+    "artista desconocido",
+    "desconocido",
+    "unknown",
+    "unknown artist",
+    "nube cloud track",
+    "sin artista",
+    "no artist",
+    "artistas varios",
+    "varios artistas",
+    "various artists",
+    "local",
+    "artista"
+  ]);
+
+  function isGenericArtistName(artist) {
+    if (!artist) return true;
+    const norm = normalizeStrictMeta(artist);
+    return !norm || GENERIC_ARTIST_NAMES.has(norm) || isGenericSongTitle(artist);
   }
 
   function matchCanonicalPreset(idOrFilenameOrTitle) {
     if (!idOrFilenameOrTitle) return null;
     const str = String(idOrFilenameOrTitle).toLowerCase().trim().replace(/^folder_/, "");
+    if (!str || isGenericSongTitle(str)) return null;
+    const strNoExt = str.replace(/\.[^/.]+$/, "").trim();
     return CANONICAL_PRESET_SONGS.find(p => {
       const pFile = p.filename.toLowerCase().trim();
       const pTitle = p.title.toLowerCase().trim();
-      const pArtist = p.artist.toLowerCase().trim();
+      const pTitleNorm = normalizeStrictMeta(p.title);
       const pClean = pFile.replace(/\.[^/.]+$/, "");
-      return str === pFile || str === pTitle || str === pClean ||
-             str.includes(pClean) || pClean.includes(str) ||
-             (str.includes(pTitle) && Math.abs(str.length - pTitle.length) < 20) ||
-             (pArtist.length > 3 && str.includes(pArtist)) ||
-             (str.includes("llorona") && pTitle.includes("llorona")) ||
-             (str.includes("rebelde") && pTitle.includes("rebelde")) ||
-             (str.includes("jeanette") && pArtist.includes("jeanette")) ||
-             (str.includes("zigeunerweisen") && pTitle.includes("zigeunerweisen")) ||
-             (str.includes("viva la vida") && pTitle.includes("viva")) ||
-             (str.includes("gangsta") && pTitle.includes("gangsta")) ||
-             (str.includes("fairytale") && pTitle.includes("fairytale")) ||
-             (str.includes("back in black") && pTitle.includes("back")) ||
-             (str.includes("paint it black") && pTitle.includes("paint")) ||
-             (str.includes("beso y una flor") && pTitle.includes("beso")) ||
-             (str.includes("libre") && pTitle.includes("libre") && pArtist.includes("nino"));
+      return str === pFile ||
+             str === pTitle ||
+             strNoExt === pTitle ||
+             strNoExt === pClean ||
+             normalizeStrictMeta(strNoExt) === pTitleNorm ||
+             (pClean.length >= 8 && strNoExt === normalizeStrictMeta(pClean));
     }) || null;
   }
 
@@ -1618,6 +1784,37 @@ async function initSpotiLocalApp() {
     }
   }
 
+  async function fetchHeaderBlobFromNativePlayer(keyOrMediaId, fileSize, ext = "mp3") {
+    if (typeof window === "undefined" || !window.SpotiLocalNativePlayer || typeof window.SpotiLocalNativePlayer.readLocalAudioRange !== "function") {
+      return null;
+    }
+    const player = window.SpotiLocalNativePlayer;
+    const mimeMap = {
+      mp3: "audio/mpeg",
+      flac: "audio/flac",
+      m4a: "audio/mp4",
+      mp4: "audio/mp4",
+      wav: "audio/wav",
+      ogg: "audio/ogg",
+      aac: "audio/aac"
+    };
+    const extLower = (ext || "").toLowerCase();
+    const mimeType = mimeMap[extLower] || "audio/mpeg";
+    const maxTagBytes = (extLower === "flac") ? 1024 * 1024 : 512 * 1024;
+    const len = Math.max(0, Math.min(Number(fileSize) || 0, maxTagBytes));
+    if (len <= 0) return null;
+    try {
+      const b64 = player.readLocalAudioRange(keyOrMediaId, 0, len);
+      if (!b64) return null;
+      const bin = atob(b64);
+      const u8 = new Uint8Array(bin.length);
+      for (let j = 0; j < bin.length; j++) u8[j] = bin.charCodeAt(j);
+      return new Blob([u8], { type: mimeType });
+    } catch (err) {
+      return null;
+    }
+  }
+
   async function getBlobFromAnySource(song, blobMap = null) {
     if (!song) return null;
 
@@ -1655,20 +1852,15 @@ async function initSpotiLocalApp() {
       let info = null;
       let matchedKey = key;
 
-      try {
-        const raw = nativePlayer.getLocalAudioInfo(key);
-        if (raw) info = JSON.parse(raw);
-      } catch (e) {}
-
-      if ((!info || !info.exists) && song.id && song.id !== key) {
+      const candidates = [key, song.id, song.nativeFileName].filter(Boolean);
+      for (const candidateKey of candidates) {
         try {
-          const raw2 = nativePlayer.getLocalAudioInfo(song.id);
-          if (raw2) {
-            const parsed = JSON.parse(raw2);
-            if (parsed && parsed.exists) {
-              info = parsed;
-              matchedKey = song.id;
-            }
+          const raw = nativePlayer.getLocalAudioInfo(candidateKey);
+          const parsed = raw ? JSON.parse(raw) : null;
+          if (parsed && parsed.exists) {
+            info = parsed;
+            matchedKey = candidateKey;
+            break;
           }
         } catch (e) {}
       }
@@ -1697,18 +1889,6 @@ async function initSpotiLocalApp() {
     let unrecoveredCount = 0;
     if (!songs || songs.length === 0) return 0;
 
-    let blobRecords = [];
-    try {
-      if (typeof musicDB !== "undefined" && musicDB.getAllBlobRecords) {
-        blobRecords = await musicDB.getAllBlobRecords() || [];
-      }
-    } catch(e) {}
-
-    const blobMap = new Map();
-    blobRecords.forEach(r => {
-      if (r && r.id && r.audioBlob instanceof Blob) blobMap.set(r.id, r.audioBlob);
-    });
-
     for (let i = 0; i < songs.length; i++) {
       const song = songs[i];
       if (!song || !song.id) continue;
@@ -1724,39 +1904,16 @@ async function initSpotiLocalApp() {
       const hasValidBlobCover = (song.coverBlob instanceof Blob) || (song.coverBlob instanceof File);
 
       // 1. Get audio blob from ANY source (IndexedDB -> native-audio)
-      const blob = await getBlobFromAnySource(song, blobMap);
+      const blob = await getBlobFromAnySource(song);
 
       let foundExactTitle = false;
       let foundExactCover = false;
 
-      // 2. If we have a blob, analyze it deterministically!
+      // 2. If we have a blob, analyze embedded ID3 / FLAC tags FIRST!
       if (blob instanceof Blob && blob.size > 0) {
         song.hasAudioBlob = true;
 
-        // 2a. Match exact file size against canonical presets
-        const presetBySize = CANONICAL_PRESET_BY_SIZE.find(p => Math.abs(p.size - blob.size) <= 4096);
-        if (presetBySize) {
-          if (genericTitle || song.title.startsWith("Canción Histórica") || !song.artist || song.artist === "Artista Local" || song.artist === "Artista Desconocido") {
-            song.title = presetBySize.title;
-            song.artist = presetBySize.artist;
-            song.album = presetBySize.album;
-            song.year = presetBySize.year;
-            song.genre = presetBySize.genre;
-            if (!song.audioUrl) song.audioUrl = getFullUrl(`/songs/${encodeURIComponent(presetBySize.filename)}`);
-            foundExactTitle = true;
-            changed = true;
-          }
-          if (!hasValidBlobCover && !song.coverBlob) {
-            const mappedCover = getMappedCoverUrl(presetBySize);
-            if (mappedCover && song.coverUrl !== mappedCover) {
-              song.coverUrl = mappedCover;
-              foundExactCover = true;
-              changed = true;
-            }
-          }
-        }
-
-        // 2b. Parse ID3 / FLAC tags from blob
+        // 2a. Parse ID3 / FLAC tags from blob before checking preset byte sizes
         try {
           const parsed = await ID3Parser.parse(blob);
           if (parsed) {
@@ -1790,6 +1947,28 @@ async function initSpotiLocalApp() {
           }
         } catch (e) {
           console.warn("ID3Parser error during recovery:", e);
+        }
+
+        // 2b. Only fallback to canonical preset file size (strict <= 512 bytes) if title is still generic
+        if (!foundExactTitle && (isGenericSongTitle(song.title) || song.title.startsWith("Canción Histórica"))) {
+          const presetBySize = CANONICAL_PRESET_BY_SIZE.find(p => Math.abs(p.size - blob.size) <= 512);
+          if (presetBySize) {
+            song.title = presetBySize.title;
+            song.artist = presetBySize.artist;
+            song.album = presetBySize.album;
+            song.year = presetBySize.year;
+            song.genre = presetBySize.genre;
+            if (!song.audioUrl) song.audioUrl = getFullUrl(`/songs/${encodeURIComponent(presetBySize.filename)}`);
+            foundExactTitle = true;
+            changed = true;
+            if (!hasValidBlobCover && !song.coverBlob) {
+              const mappedCover = getMappedCoverUrl(presetBySize);
+              if (mappedCover && song.coverUrl !== mappedCover) {
+                song.coverUrl = mappedCover;
+                foundExactCover = true;
+              }
+            }
+          }
         }
       }
 
@@ -1886,7 +2065,8 @@ async function initSpotiLocalApp() {
       renderWrappedStats();
       try { renderHistoricalRanking(true); } catch(e) {}
       if (typeof hydrateCoverArt === "function") hydrateCoverArt(songs);
-      if (currentSong) updatePlayerMetadata(currentSong);
+      const activePlaying = currentSongIndex >= 0 ? currentQueue[currentSongIndex] : null;
+      if (activePlaying) updatePlayerMetadata(activePlaying);
       if (typeof showToast === "function") {
         let msg = `✨ ${titlesRecovered} títulos y ${coversRecovered} carátulas recuperados`;
         if (unrecoveredCount > 0) {
@@ -1918,9 +2098,19 @@ async function initSpotiLocalApp() {
     const lines = [];
     lines.push("=== DIAGNÓSTICO FORENSE DE BIBLIOTECA SPOTILOCAL ===");
     lines.push(`Fecha: ${new Date().toISOString()}`);
-    lines.push(`App Version: 1.8.4 (Build #75, versionCode 26)`);
+    lines.push(`App Version: 1.8.7 (Build #79, versionCode 29)`);
     lines.push(`Total canciones en memoria: ${songs.length}`);
     lines.push(`User Agent: ${navigator.userAgent}`);
+    try {
+      if (typeof loadNativeDurableBackup === "function") {
+        const b = loadNativeDurableBackup();
+        if (b) {
+          lines.push(`Backup Nativo Durable: SÍ (${Array.isArray(b.songs) ? b.songs.length : 0} canciones, actualizado: ${b.updatedAt ? new Date(b.updatedAt).toISOString() : "n/a"})`);
+        } else {
+          lines.push("Backup Nativo Durable: VACÍO / No generado aún");
+        }
+      }
+    } catch (e) {}
     lines.push("");
 
     const nativePlayer = (typeof window !== "undefined" && window.SpotiLocalNativePlayer) ? window.SpotiLocalNativePlayer : null;
@@ -1939,13 +2129,13 @@ async function initSpotiLocalApp() {
     lines.push(`Archivos en files/native-audio: ${nativeFiles.length}`);
     lines.push("--------------------------------------------------");
 
-    let blobRecords = [];
+    let blobKeys = [];
     try {
-      if (typeof musicDB !== "undefined" && musicDB.getAllBlobRecords) {
-        blobRecords = await musicDB.getAllBlobRecords() || [];
+      if (typeof musicDB !== "undefined" && musicDB.getAllBlobKeys) {
+        blobKeys = await musicDB.getAllBlobKeys() || [];
       }
     } catch(e) {}
-    lines.push(`Registros en IndexedDB song_blobs: ${blobRecords.length}`);
+    lines.push(`Registros en IndexedDB song_blobs: ${blobKeys.length}`);
     lines.push("--------------------------------------------------");
     lines.push("");
 
@@ -2013,11 +2203,10 @@ async function initSpotiLocalApp() {
     lines.push("");
     lines.push("--- AUDITORÍA DE ESTADÍSTICAS ---");
     const diagStats = typeof getStatsIndex === "function" ? getStatsIndex() : { historyTotal: 0, yearTotal: 0 };
+    const diagSongSum = (songs || []).reduce((acc, item) => acc + (Number(item && item.totalTimeListened) || 0), 0);
     lines.push(`Total Histórico Visible: ${Math.round(diagStats.historyTotal || 0)} s (${((diagStats.historyTotal || 0) / 3600).toFixed(2)} h)`);
     lines.push(`Total Este Año Visible: ${Math.round(diagStats.yearTotal || 0)} s (${((diagStats.yearTotal || 0) / 3600).toFixed(2)} h)`);
-    lines.push(`Total Histórico Persistido: ${Math.round(_persistedGlobalTotalSeconds || 0)} s (${((_persistedGlobalTotalSeconds || 0) / 3600).toFixed(2)} h)`);
-    lines.push(`Total Este Año Persistido: ${Math.round(_persistedYearlyTotalSeconds || 0)} s (${((_persistedYearlyTotalSeconds || 0) / 3600).toFixed(2)} h)`);
-    lines.push(`Suelo Histórico Fijado: ${Math.round(_persistedHistoricalFloorSeconds || 0)} s (${((_persistedHistoricalFloorSeconds || 0) / 3600).toFixed(2)} h)`);
+    lines.push(`Suma Real por Canción: ${Math.round(diagSongSum)} s (${(diagSongSum / 3600).toFixed(2)} h)`);
     lines.push(`Caché de Logs en Memoria: ${(_listeningLogsCache || []).length} entradas compactadas`);
     lines.push("");
     lines.push("=== FIN DEL INFORME ===");
@@ -2076,9 +2265,11 @@ async function initSpotiLocalApp() {
   };
 
   // ==========================================================================
-  // INFRANQUEABILIDAD ESTADÍSTICA: LEDGER PERMANENTE POR CANCIÓN (LA VACUNA)
-  // Desacoplado de logs rotatorios y blindado contra borrados, re-escaneos y reparaciones.
+  // INFRANQUEABILIDAD ESTADÍSTICA: LEDGER PERMANENTE POR CANCIÓN v2
+  // Coincidencia estricta por ID o metadato exacto. Cero subcadenas ni heurísticas.
   // ==========================================================================
+  const SONG_STATS_LEDGER_LS_KEY = "spotilocal_song_ledger_v2";
+  const SONG_STATS_LEDGER_DB_KEY = "song_stats_ledger_v2";
   let _songStatsLedgerCache = null;
   let _songStatsLedgerFlushTimer = null;
 
@@ -2086,48 +2277,145 @@ async function initSpotiLocalApp() {
     let title = "";
     let artist = "";
     let id = "";
+    let statsIsolated = false;
     if (songOrTitle && typeof songOrTitle === "object") {
       title = songOrTitle.title || "";
       artist = songOrTitle.artist || "";
       id = songOrTitle.id || "";
+      statsIsolated = Boolean(songOrTitle.statsIsolated);
     } else {
       title = songOrTitle || "";
       artist = optArtist || "";
     }
 
-    let cleanTitle = String(title || "")
-      .replace(/\.(mp3|flac|wav|ogg|m4a|aac|webm)$/i, "")
-      .toLowerCase()
-      .trim()
-      .replace(/\s+/g, " ");
-
-    let cleanArtist = String(artist || "")
-      .toLowerCase()
-      .trim()
-      .replace(/\s+/g, " ");
-
-    if ((!cleanTitle || (typeof isGenericSongTitle === "function" && isGenericSongTitle(cleanTitle))) && id) {
-      const parsedFromId = String(id)
-        .replace(/^folder_/, "")
-        .replace(/^blob_/, "")
-        .replace(/\.[a-z0-9]+$/i, "")
-        .trim()
-        .toLowerCase();
-      if (parsedFromId) cleanTitle = parsedFromId;
+    const cleanId = id ? String(id).toLowerCase().trim() : "";
+    if (statsIsolated && cleanId) {
+      return `id:::${cleanId}`;
     }
 
-    if (!cleanTitle && !cleanArtist) {
-      if (id) return `id:::${String(id).toLowerCase().trim()}`;
-      return "desconocido:::desconocido";
+    const cleanTitle = normalizeStrictMeta(title);
+    const cleanArtist = normalizeStrictMeta(artist);
+    const hasRealTitle = Boolean(cleanTitle && !isGenericSongTitle(title));
+    const hasRealArtist = Boolean(cleanArtist && !isGenericArtistName(artist));
+
+    // Songs without BOTH a real non-generic title AND a real non-generic artist
+    // MUST stay isolated by song ID so unrelated tracks never share a bucket.
+    if (!hasRealTitle || !hasRealArtist) {
+      if (cleanId) return `id:::${cleanId}`;
+      return "";
     }
 
     return `${cleanArtist}:::${cleanTitle}`;
   }
 
+  function isUnsafeSharedCanonicalKey(k) {
+    if (typeof k !== "string" || !k) return true;
+    if (k.startsWith("id:::")) return false;
+    const sepIdx = k.indexOf(":::");
+    if (sepIdx === -1) return true;
+    const kArtist = k.slice(0, sepIdx).trim();
+    const kTitle = k.slice(sepIdx + 3).trim();
+    if (!kArtist || !kTitle) return true;
+    if (isGenericArtistName(kArtist) || isGenericSongTitle(kTitle)) return true;
+    // Also catch reversed legacy keys (e.g. "cancion:::artista desconocido")
+    if (isGenericArtistName(kTitle)) return true;
+    return false;
+  }
+
+  function untangleLegacySharedGenericLedgerKeys(ledger, songList = null) {
+    if (!ledger || typeof ledger !== "object") return { changed: false, multiRefSongs: new Set(), hadEmptyBucketSongs: new Set() };
+    if (!ledger.canonical || typeof ledger.canonical !== "object") ledger.canonical = {};
+    if (!ledger.bySongId || typeof ledger.bySongId !== "object") ledger.bySongId = {};
+
+    let changed = false;
+    const keyToSongIds = new Map();
+    const hadEmptyBucketSongs = new Set();
+    const multiRefSongs = new Set();
+
+    for (const sid in ledger.bySongId) {
+      const k = ledger.bySongId[sid];
+      if (typeof k !== "string" || k.startsWith("id:::")) continue;
+      if (!keyToSongIds.has(k)) keyToSongIds.set(k, []);
+      keyToSongIds.get(k).push(sid);
+
+      if (isUnsafeSharedCanonicalKey(k)) {
+        hadEmptyBucketSongs.add(sid);
+        delete ledger.bySongId[sid];
+        changed = true;
+      }
+    }
+
+    const activeList = Array.isArray(songList) ? songList : (typeof songs !== "undefined" && Array.isArray(songs) ? songs : []);
+    const liveKeyToSongs = new Map();
+    const liveReversedKeyToSongs = new Map();
+    for (let i = 0; i < activeList.length; i++) {
+      const s = activeList[i];
+      if (!s || !s.id || s.statsIsolated || isGenericArtistName(s.artist) || isGenericSongTitle(s.title)) continue;
+      const nt = normalizeStrictMeta(s.title);
+      const na = normalizeStrictMeta(s.artist);
+      if (!nt || !na) continue;
+      const k = `${na}:::${nt}`;
+      if (!liveKeyToSongs.has(k)) liveKeyToSongs.set(k, []);
+      liveKeyToSongs.get(k).push(s);
+      const revK = `${nt}:::${na}`;
+      if (revK !== k) {
+        if (!liveReversedKeyToSongs.has(revK)) liveReversedKeyToSongs.set(revK, []);
+        liveReversedKeyToSongs.get(revK).push(s);
+      }
+    }
+
+    const collidingKeys = new Set();
+    for (const [k, sids] of keyToSongIds.entries()) {
+      if (sids.length > 1) {
+        const liveMatches = liveKeyToSongs.get(k) || liveReversedKeyToSongs.get(k) || [];
+        if (isUnsafeSharedCanonicalKey(k) || liveKeyToSongs.size === 0 || liveMatches.length > 1) {
+          collidingKeys.add(k);
+          for (const sid of sids) multiRefSongs.add(sid);
+        }
+      }
+    }
+    for (const [k, liveMatches] of liveKeyToSongs.entries()) {
+      if (liveMatches.length > 1) {
+        collidingKeys.add(k);
+        for (const s of liveMatches) {
+          multiRefSongs.add(s.id);
+          s.statsIsolated = true;
+        }
+      }
+    }
+    for (const [revK, liveMatches] of liveReversedKeyToSongs.entries()) {
+      if (liveMatches.length > 1) {
+        collidingKeys.add(revK);
+      }
+    }
+
+    for (const k of collidingKeys) {
+      if (Object.prototype.hasOwnProperty.call(ledger.canonical, k)) {
+        delete ledger.canonical[k];
+        changed = true;
+      }
+      for (const sid in ledger.bySongId) {
+        if (ledger.bySongId[sid] === k) {
+          delete ledger.bySongId[sid];
+          changed = true;
+        }
+      }
+    }
+
+    for (const k in ledger.canonical) {
+      if (isUnsafeSharedCanonicalKey(k)) {
+        delete ledger.canonical[k];
+        changed = true;
+      }
+    }
+
+    return { changed, multiRefSongs, hadEmptyBucketSongs };
+  }
+
   function getSongStatsLedger() {
     if (_songStatsLedgerCache !== null) return _songStatsLedgerCache;
     try {
-      const raw = localStorage.getItem("spotilocal_song_ledger");
+      const raw = localStorage.getItem(SONG_STATS_LEDGER_LS_KEY);
       if (raw) {
         _songStatsLedgerCache = JSON.parse(raw);
       }
@@ -2146,11 +2434,11 @@ async function initSpotiLocalApp() {
       _songStatsLedgerFlushTimer = null;
       try {
         const ledger = getSongStatsLedger();
-        localStorage.setItem("spotilocal_song_ledger", JSON.stringify(ledger));
+        localStorage.setItem(SONG_STATS_LEDGER_LS_KEY, JSON.stringify(ledger));
         if (typeof musicDB !== "undefined" && musicDB.saveSongStatsLedger) {
-          musicDB.saveSongStatsLedger(ledger).catch(() => {});
+          musicDB.saveSongStatsLedger(ledger, SONG_STATS_LEDGER_DB_KEY).catch(() => {});
         } else if (typeof musicDB !== "undefined" && musicDB.setSetting) {
-          musicDB.setSetting("song_stats_ledger", ledger).catch(() => {});
+          musicDB.setSetting(SONG_STATS_LEDGER_DB_KEY, ledger).catch(() => {});
         }
       } catch (e) {}
     }, 1000);
@@ -2160,17 +2448,18 @@ async function initSpotiLocalApp() {
     try {
       let dbLedger = null;
       if (typeof musicDB !== "undefined" && musicDB.getSongStatsLedger) {
-        dbLedger = await musicDB.getSongStatsLedger();
+        dbLedger = await musicDB.getSongStatsLedger(SONG_STATS_LEDGER_DB_KEY);
       } else if (typeof musicDB !== "undefined" && musicDB.getSetting) {
-        dbLedger = await musicDB.getSetting("song_stats_ledger", null);
+        dbLedger = await musicDB.getSetting(SONG_STATS_LEDGER_DB_KEY, null);
       }
       if (!dbLedger || typeof dbLedger !== "object") return;
 
       const mem = getSongStatsLedger();
-      let changed = false;
+      let changed = untangleLegacySharedGenericLedgerKeys(mem).changed;
 
       if (dbLedger.canonical) {
         for (const k in dbLedger.canonical) {
+          if (!k || (!k.startsWith("id:::") && isUnsafeSharedCanonicalKey(k))) continue;
           const remote = dbLedger.canonical[k];
           if (!remote) continue;
           const local = mem.canonical[k];
@@ -2192,15 +2481,17 @@ async function initSpotiLocalApp() {
 
       if (dbLedger.bySongId) {
         for (const sid in dbLedger.bySongId) {
+          const mappedKey = dbLedger.bySongId[sid];
+          if (!mappedKey || (typeof mappedKey === "string" && !mappedKey.startsWith("id:::") && isUnsafeSharedCanonicalKey(mappedKey))) continue;
           if (!mem.bySongId[sid]) {
-            mem.bySongId[sid] = dbLedger.bySongId[sid];
+            mem.bySongId[sid] = mappedKey;
             changed = true;
           }
         }
       }
 
       if (changed) {
-        localStorage.setItem("spotilocal_song_ledger", JSON.stringify(mem));
+        localStorage.setItem(SONG_STATS_LEDGER_LS_KEY, JSON.stringify(mem));
       }
     } catch (e) {
       console.warn("restoreSongStatsLedgerFromDB error:", e);
@@ -2210,12 +2501,32 @@ async function initSpotiLocalApp() {
   function getSongLedgerStats(song) {
     if (!song) return { totalTimeListened: 0, playCount: 0 };
     const ledger = getSongStatsLedger();
-    const canKey = getSongCanonicalKey(song);
-    let entry = ledger.canonical[canKey];
+    let entry = null;
 
-    if (!entry && song.id && ledger.bySongId[song.id]) {
+    if (song.statsIsolated) {
+      const idKey = song.id ? `id:::${String(song.id).toLowerCase().trim()}` : "";
+      if (idKey && ledger.canonical[idKey]) {
+        entry = ledger.canonical[idKey];
+      } else if (song.id && ledger.bySongId[song.id] && String(ledger.bySongId[song.id]).startsWith("id:::")) {
+        entry = ledger.canonical[ledger.bySongId[song.id]];
+      }
+      if (!entry) return { totalTimeListened: 0, playCount: 0 };
+      return {
+        totalTimeListened: Number(entry.totalTimeListened) || 0,
+        playCount: Number(entry.playCount) || 0
+      };
+    }
+
+    if (song.id && ledger.bySongId[song.id]) {
       const mappedKey = ledger.bySongId[song.id];
-      entry = ledger.canonical[mappedKey];
+      if (typeof mappedKey === "string" && !mappedKey.startsWith(":::")) {
+        entry = ledger.canonical[mappedKey];
+      }
+    }
+
+    if (!entry) {
+      const canKey = getSongCanonicalKey(song);
+      if (canKey) entry = ledger.canonical[canKey];
     }
 
     if (!entry) {
@@ -2228,22 +2539,27 @@ async function initSpotiLocalApp() {
     };
   }
 
-  function recordSongLedgerMonotonic(song, addSeconds = 0, addPlays = 0) {
+  function recordSongLedgerMonotonic(song, addSeconds = 0, addPlays = 0, forceExact = false) {
     if (!song) return { totalTimeListened: 0, playCount: 0 };
     const ledger = getSongStatsLedger();
     const canKey = getSongCanonicalKey(song);
+    if (!canKey) return { totalTimeListened: Number(song.totalTimeListened) || 0, playCount: Number(song.playCount) || 0 };
     const sid = song.id ? String(song.id) : null;
 
     let entry = ledger.canonical[canKey];
-    if (!entry && sid && ledger.bySongId[sid]) {
-      entry = ledger.canonical[ledger.bySongId[sid]];
+    if (!entry && sid && ledger.bySongId[sid] && !String(ledger.bySongId[sid]).startsWith(":::")) {
+      const existingMapped = ledger.canonical[ledger.bySongId[sid]];
+      if (existingMapped && !song.statsIsolated) {
+        entry = existingMapped;
+      }
     }
 
     if (!entry) {
       entry = {
         canonicalKey: canKey,
         title: song.title || "Canción",
-        artist: song.artist || "Artista",
+        artist: (song.artist && !isGenericArtistName(song.artist)) ? song.artist : "",
+        isolated: Boolean(song.statsIsolated || canKey.startsWith("id:::")),
         totalTimeListened: 0,
         playCount: 0,
         lastUpdated: Date.now()
@@ -2255,9 +2571,12 @@ async function initSpotiLocalApp() {
       ledger.bySongId[sid] = canKey;
     }
 
-    // Monotonic Invariant: numbers can NEVER decrease
-    const baseTime = Math.max(Number(entry.totalTimeListened) || 0, Number(song.totalTimeListened) || 0);
-    const basePlays = Math.max(Number(entry.playCount) || 0, Number(song.playCount) || 0);
+    const baseTime = forceExact
+      ? Math.max(0, Number(song.totalTimeListened) || 0)
+      : Math.max(Number(entry.totalTimeListened) || 0, Number(song.totalTimeListened) || 0);
+    const basePlays = forceExact
+      ? Math.max(0, Number(song.playCount) || 0)
+      : Math.max(Number(entry.playCount) || 0, Number(song.playCount) || 0);
 
     const safeAddSecs = Math.max(0, Number(addSeconds) || 0);
     const safeAddPlays = Math.max(0, Number(addPlays) || 0);
@@ -2265,48 +2584,688 @@ async function initSpotiLocalApp() {
     const newTime = Math.round((baseTime + safeAddSecs) * 100) / 100;
     const newPlays = basePlays + safeAddPlays;
 
+    entry.canonicalKey = canKey;
+    entry.isolated = Boolean(song.statsIsolated || canKey.startsWith("id:::"));
     entry.totalTimeListened = newTime;
     entry.playCount = newPlays;
     entry.lastUpdated = Date.now();
     if (song.title && typeof isGenericSongTitle === "function" && !isGenericSongTitle(song.title)) entry.title = song.title;
-    if (song.artist && song.artist !== "Artista Desconocido") entry.artist = song.artist;
+    if (song.artist && !isGenericArtistName(song.artist)) entry.artist = song.artist;
 
     scheduleSongStatsLedgerFlush();
 
     return { totalTimeListened: newTime, playCount: newPlays };
   }
 
-  function calculateSongStatsFromLogs(songId, songTitle, songArtist) {
+  // Exact-only log aggregation (NEVER matches by partial substrings or generic-artist titles)
+  function calculateSongStatsFromLogs(songId, songTitle, songArtist, songDuration = 0, options = {}) {
     const logs = getListeningLogs();
     let totalSeconds = 0;
     let playsCount = 0;
-    const cleanTitle = (songTitle || "").toLowerCase().trim();
-    const cleanId = String(songId || "").toLowerCase();
+    let legacyPlayUnits = 0;
+    let hasLegacyBlocks = false;
+
+    const cleanId = String(songId || "").toLowerCase().trim();
+    const cleanIdNoFolder = cleanId.replace(/^folder_/, "");
+    const normTitle = normalizeStrictMeta(songTitle);
+    const normArtist = normalizeStrictMeta(songArtist);
+    const titleIsReal = Boolean(normTitle && !isGenericSongTitle(songTitle));
+    const artistIsReal = Boolean(normArtist && !isGenericArtistName(songArtist));
+    const strictIdOnly = Boolean(options && options.strictIdOnly);
+    const safeDur = Math.max(0, Number(songDuration) || 0);
 
     for (let i = 0; i < logs.length; i++) {
       const l = logs[i];
       if (!l) continue;
-      const sid = String(l.songId || "").toLowerCase();
+      const sid = String(l.songId || "").toLowerCase().trim();
+      const sidNoFolder = sid.replace(/^folder_/, "");
       let matches = false;
 
-      if (sid === cleanId) {
+      if (cleanId && (sid === cleanId || (sidNoFolder && sidNoFolder === cleanIdNoFolder))) {
         matches = true;
-      } else if (cleanTitle && (sid.includes(cleanTitle) || (l.title && l.title.toLowerCase().includes(cleanTitle)))) {
-        matches = true;
+      } else if (!strictIdOnly && titleIsReal && artistIsReal && l.title && !isGenericSongTitle(l.title) && l.artist && !isGenericArtistName(l.artist)) {
+        const logTitle = normalizeStrictMeta(l.title);
+        const logArtist = normalizeStrictMeta(l.artist);
+        if (logTitle === normTitle && logArtist === normArtist) {
+          matches = true;
+        }
       }
 
       if (matches) {
         const s = Number(l.seconds) || 0;
-        totalSeconds += s;
-        if (s >= 10) playsCount++;
+        if (s > 0 && s <= 3600) {
+          totalSeconds += s;
+        }
+        if (typeof l.scrobbles === "number" && l.scrobbles >= 0) {
+          playsCount += Math.floor(l.scrobbles);
+        } else if (s >= 10) {
+          hasLegacyBlocks = true;
+          if (safeDur > 20 && s > safeDur * 1.4) {
+            legacyPlayUnits += Math.max(1, Math.round(s / safeDur));
+          } else {
+            legacyPlayUnits += 1;
+          }
+        }
       }
     }
 
-    if (totalSeconds > 0 && playsCount === 0) {
-      playsCount = Math.max(1, Math.round(totalSeconds / 180));
+    playsCount += legacyPlayUnits;
+    if (hasLegacyBlocks && totalSeconds > 0 && playsCount === 0) {
+      playsCount = Math.max(1, safeDur > 20 ? Math.round(totalSeconds / safeDur) : Math.round(totalSeconds / 180));
     }
 
     return { totalSeconds: Math.round(totalSeconds * 100) / 100, playCount: playsCount };
+  }
+
+  // Diagnostic fingerprint to detect songs inflated by the legacy v1.8.4 substring bug
+  function computeLegacySubstringAuditSeconds(songId, songTitle) {
+    const cleanTitle = (songTitle || "").toLowerCase().trim();
+    const cleanId = String(songId || "").toLowerCase();
+    if (!cleanTitle) return 0;
+    const logs = getListeningLogs();
+    let total = 0;
+    for (let i = 0; i < logs.length; i++) {
+      const l = logs[i];
+      if (!l) continue;
+      const sid = String(l.songId || "").toLowerCase();
+      if (sid === cleanId || sid.indexOf(cleanTitle) !== -1 || (l.title && l.title.toLowerCase().indexOf(cleanTitle) !== -1)) {
+        total += Number(l.seconds) || 0;
+      }
+    }
+    return total;
+  }
+
+  async function sanitizeCorruptedSongStats(songList) {
+    if (!Array.isArray(songList) || songList.length === 0) return 0;
+    let sanitizedCount = 0;
+    const ledger = getSongStatsLedger();
+    const untangleInfo = untangleLegacySharedGenericLedgerKeys(ledger, songList);
+    let ledgerChanged = untangleInfo.changed;
+
+    const logs = getListeningLogs();
+    const archivedSecs = parseFloat(localStorage.getItem("spotilocal_archived_secs") || "0") || 0;
+    let minLogTimestamp = Infinity;
+    for (let j = 0; j < logs.length; j++) {
+      const ts = Number(logs[j] && logs[j].timestamp) || 0;
+      if (ts > 0 && ts < minLogTimestamp) minLogTimestamp = ts;
+    }
+    if (!Number.isFinite(minLogTimestamp)) minLogTimestamp = 0;
+
+    const duplicateGenericTitleCounts = new Map();
+    for (let j = 0; j < songList.length; j++) {
+      const sj = songList[j];
+      if (!sj || !sj.title || isGenericSongTitle(sj.title)) continue;
+      if (isGenericArtistName(sj.artist)) {
+        const nt = normalizeStrictMeta(sj.title);
+        if (nt) duplicateGenericTitleCounts.set(nt, (duplicateGenericTitleCounts.get(nt) || 0) + 1);
+      }
+    }
+
+    for (let i = 0; i < songList.length; i++) {
+      const s = songList[i];
+      if (!s || !s.id) continue;
+
+      const trackDur = Math.max(0, Number(s.rawDuration || s.duration) || 0);
+      const exactStats = calculateSongStatsFromLogs(s.id, s.title, s.artist, trackDur, {
+        strictIdOnly: Boolean(s.statsIsolated)
+      });
+      const curTime = Math.max(0, Number(s.totalTimeListened) || 0);
+      const curPlays = Math.max(0, Number(s.playCount) || 0);
+
+      let isTimeCorrupted = false;
+      if (curTime > exactStats.totalSeconds + 60) {
+        const legacySum = computeLegacySubstringAuditSeconds(s.id, s.title);
+        const hadSharedGenericBucket = untangleInfo.multiRefSongs.has(s.id);
+        const normTitle = normalizeStrictMeta(s.title);
+        const isDuplicateGenericArtistTitle = Boolean(
+          isGenericArtistName(s.artist) && normTitle && (duplicateGenericTitleCounts.get(normTitle) || 0) > 1
+        );
+        const nowTs = Date.now();
+        const wallClockImpossible = Boolean(
+          s.dateAdded &&
+          s.dateAdded > 1577836800000 &&
+          nowTs > s.dateAdded &&
+          curTime > ((nowTs - s.dateAdded) / 1000) * 1.25 + 120
+        );
+        const coveredByNonRotatedLogs = Boolean(
+          archivedSecs === 0 &&
+          logs.length > 0 &&
+          logs.length < 9500 &&
+          s.dateAdded &&
+          minLogTimestamp &&
+          s.dateAdded >= (minLogTimestamp - 86400000) &&
+          (exactStats.totalSeconds > 0 || curTime > 1800)
+        );
+
+        if (legacySum > exactStats.totalSeconds * 1.15 && curTime >= legacySum * 0.65) {
+          isTimeCorrupted = true;
+        } else if (isGenericSongTitle(s.title)) {
+          isTimeCorrupted = true;
+        } else if (hadSharedGenericBucket || isDuplicateGenericArtistTitle) {
+          isTimeCorrupted = true;
+        } else if (wallClockImpossible) {
+          isTimeCorrupted = true;
+        } else if (coveredByNonRotatedLogs && curTime > Math.max(exactStats.totalSeconds * 1.75 + 60, 300)) {
+          isTimeCorrupted = true;
+        } else if (exactStats.totalSeconds > 120 && curTime > exactStats.totalSeconds * 1.85 + 60) {
+          isTimeCorrupted = true;
+        } else if (trackDur > 30 && curTime > Math.max(curPlays, exactStats.playCount, 1) * trackDur * 3 + 600 && curTime > exactStats.totalSeconds * 1.5 + 120) {
+          isTimeCorrupted = true;
+        } else if (curTime > 10 * 3600 && exactStats.totalSeconds < curTime * 0.5) {
+          isTimeCorrupted = true;
+        }
+      }
+
+      const targetTime = isTimeCorrupted ? exactStats.totalSeconds : curTime;
+      let isPlaysCorrupted = false;
+      let sanitizedPlays = curPlays;
+      if (targetTime <= 0 && curPlays > 0) {
+        isPlaysCorrupted = true;
+        sanitizedPlays = exactStats.playCount;
+      } else if (trackDur > 30) {
+        const maxPhysicalPlays = Math.ceil(targetTime / Math.max(10, trackDur * 0.45));
+        if (curPlays > Math.max(exactStats.playCount, maxPhysicalPlays) + 2) {
+          isPlaysCorrupted = true;
+          sanitizedPlays = Math.max(exactStats.playCount, Math.min(curPlays, maxPhysicalPlays));
+        }
+      }
+
+      if (isTimeCorrupted || isPlaysCorrupted) {
+        s.totalTimeListened = targetTime;
+        s.playCount = isTimeCorrupted ? exactStats.playCount : sanitizedPlays;
+        s._forceExactStats = true;
+        recordSongLedgerMonotonic(s, 0, 0, true);
+        ledgerChanged = true;
+        sanitizedCount++;
+        try {
+          if (typeof musicDB !== "undefined" && musicDB.saveSongMeta) {
+            await musicDB.saveSongMeta(s, { forceExactStats: true });
+          }
+        } catch (e) {}
+      } else {
+        const ledgerStats = getSongLedgerStats(s);
+        const safeTime = Math.max(curTime, ledgerStats.totalTimeListened || 0, exactStats.totalSeconds || 0);
+        const safePlays = Math.max(curPlays, ledgerStats.playCount || 0, exactStats.playCount || 0);
+        if (safeTime !== curTime || safePlays !== curPlays) {
+          s.totalTimeListened = safeTime;
+          s.playCount = safePlays;
+        }
+        recordSongLedgerMonotonic(s, 0, 0, false);
+        if (untangleInfo.multiRefSongs.has(s.id) && typeof musicDB !== "undefined" && musicDB.saveSongMeta) {
+          try {
+            await musicDB.saveSongMeta(s);
+          } catch (e) {}
+        }
+      }
+    }
+
+    if (sanitizedCount > 0 || ledgerChanged) {
+      try {
+        localStorage.setItem(SONG_STATS_LEDGER_LS_KEY, JSON.stringify(ledger));
+        if (typeof musicDB !== "undefined" && musicDB.saveSongStatsLedger) {
+          await musicDB.saveSongStatsLedger(ledger, SONG_STATS_LEDGER_DB_KEY).catch(() => {});
+        }
+      } catch (e) {}
+    }
+    return sanitizedCount;
+  }
+
+  async function isGhostSongWithoutAudio(song) {
+    if (!song || !song.id) return true;
+    const isPhantomTitle = (typeof song.title === "string") &&
+      (song.title.startsWith("Canción Histórica") || song.title.startsWith("Sin identificar"));
+    if (!isPhantomTitle) return false;
+    if (song.audioBlob instanceof Blob || song.hasAudioBlob || song.audioUrl) return false;
+    try {
+      if (typeof musicDB !== "undefined" && musicDB.getAudioBlob) {
+        const b = await musicDB.getAudioBlob(song.id);
+        if (b instanceof Blob && b.size > 0) return false;
+      }
+    } catch (e) {}
+    const nativePlayer = (typeof window !== "undefined" && window.SpotiLocalNativePlayer) ? window.SpotiLocalNativePlayer : null;
+    if (nativePlayer && typeof nativePlayer.getLocalAudioInfo === "function") {
+      try {
+        const key = getNativeAudioKey(song);
+        const raw1 = nativePlayer.getLocalAudioInfo(key);
+        const info1 = raw1 ? JSON.parse(raw1) : null;
+        if (info1 && info1.exists && info1.size > 0) return false;
+        if (key !== song.id) {
+          const raw2 = nativePlayer.getLocalAudioInfo(song.id);
+          const info2 = raw2 ? JSON.parse(raw2) : null;
+          if (info2 && info2.exists && info2.size > 0) return false;
+        }
+      } catch (e) {}
+    }
+    return true;
+  }
+
+  async function recoverSongEntryFromBlobId(blobId) {
+    const meta = {
+      title: "",
+      artist: "Artista Local",
+      album: "Música en Móvil",
+      year: "2026",
+      genre: "Audio Local",
+      coverBlob: null
+    };
+    let blob = null;
+    try {
+      if (typeof musicDB !== "undefined" && musicDB.getAudioBlob) {
+        blob = await musicDB.getAudioBlob(blobId);
+      }
+    } catch (e) {}
+    const isRealBlob = (blob instanceof Blob && blob.size > 0);
+    if (isRealBlob) {
+      try {
+        const parsed = await ID3Parser.parse(blob);
+        if (parsed) {
+          if (parsed.title && !isGenericSongTitle(parsed.title)) meta.title = parsed.title;
+          if (parsed.artist && parsed.artist !== "Artista Desconocido") meta.artist = parsed.artist;
+          if (parsed.album && parsed.album !== "Álbum Desconocido") meta.album = parsed.album;
+          if (parsed.year) meta.year = parsed.year;
+          if (parsed.genre) meta.genre = parsed.genre;
+          if (parsed.coverBlob) meta.coverBlob = parsed.coverBlob;
+        }
+      } catch (e) {}
+      if (!meta.title) {
+        const presetBySize = CANONICAL_PRESET_BY_SIZE.find(p => Math.abs(p.size - blob.size) <= 512);
+        if (presetBySize) {
+          meta.title = presetBySize.title;
+          meta.artist = presetBySize.artist;
+          meta.album = presetBySize.album;
+          meta.year = presetBySize.year;
+          meta.genre = presetBySize.genre;
+        }
+      }
+    }
+    if (!meta.title) {
+      const presetMatch = findPresetForSong({ id: blobId });
+      if (presetMatch) {
+        meta.title = presetMatch.title;
+        meta.artist = presetMatch.artist;
+        meta.album = presetMatch.album;
+        meta.year = presetMatch.year;
+        meta.genre = presetMatch.genre;
+      } else {
+        meta.title = (isRealBlob && blob.name ? blob.name.replace(/\.[^/.]+$/, "") : `Tema Local (${blobId.slice(-6)})`);
+      }
+    }
+
+    const isGeneric = isGenericArtistName(meta.artist) || isGenericSongTitle(meta.title);
+    const exactStats = calculateSongStatsFromLogs(blobId, meta.title, meta.artist, 0, {
+      strictIdOnly: isGeneric
+    });
+    const ledgerStats = getSongLedgerStats({ id: blobId, title: meta.title, artist: meta.artist, statsIsolated: isGeneric });
+    return {
+      id: blobId,
+      title: meta.title,
+      artist: meta.artist,
+      album: meta.album,
+      year: meta.year,
+      genre: meta.genre,
+      audioBlob: null,
+      hasAudioBlob: isRealBlob,
+      coverBlob: meta.coverBlob,
+      isLiked: false,
+      statsIsolated: isGeneric,
+      playCount: Math.max(ledgerStats.playCount || 0, exactStats.playCount || 0),
+      totalTimeListened: Math.max(ledgerStats.totalTimeListened || 0, exactStats.totalSeconds || 0),
+      dateAdded: Date.now() - (7 * 86400 * 1000)
+    };
+  }
+
+  let _libraryInitialHydrationDone = false;
+  let _durableBackupTimer = null;
+  const _nativeAudioHashCache = new Map();
+
+  function getCachedNativeAudioHash(mediaId) {
+    if (!mediaId) return "";
+    if (_nativeAudioHashCache.has(mediaId)) return _nativeAudioHashCache.get(mediaId);
+    const np = (typeof window !== "undefined" && window.SpotiLocalNativePlayer) ? window.SpotiLocalNativePlayer : null;
+    if (np && typeof np.getNativeAudioHash === "function") {
+      try {
+        const h = String(np.getNativeAudioHash(String(mediaId)) || "").toLowerCase();
+        if (h) {
+          _nativeAudioHashCache.set(mediaId, h);
+          return h;
+        }
+      } catch (e) {}
+    }
+    return "";
+  }
+
+  async function buildDurableBackupPayload(songList) {
+    let allLyrics = {};
+    try {
+      if (typeof musicDB !== "undefined" && musicDB.getAllLyrics) {
+        allLyrics = await musicDB.getAllLyrics();
+      }
+    } catch (e) {}
+
+    const list = Array.isArray(songList) ? songList : (songs || []);
+    const serializedSongs = list
+      .filter(s => s && s.id && !isSongDeleted(s.id, s.title))
+      .map(s => {
+        const lst = (typeof getSongLedgerStats === "function") ? getSongLedgerStats(s) : null;
+        const safeTime = Math.max(Number(s.totalTimeListened) || 0, lst ? (lst.totalTimeListened || 0) : 0);
+        const safePlays = Math.max(Number(s.playCount) || 0, lst ? (lst.playCount || 0) : 0);
+        const nKey = getNativeAudioKey(s);
+        return {
+          id: s.id,
+          title: s.title,
+          artist: s.artist,
+          album: s.album,
+          year: s.year,
+          genre: s.genre,
+          audioUrl: s.audioUrl || null,
+          coverUrl: s.coverUrl || null,
+          hasAudioBlob: Boolean(s.hasAudioBlob || (s.audioBlob instanceof Blob)),
+          nativeAudioKey: nKey || "",
+          nativeAudioHash: getCachedNativeAudioHash(s.id) || getCachedNativeAudioHash(nKey) || "",
+          nativeAudioExt: getNativeAudioExtension(s),
+          nativeFileName: s.nativeFileName || null,
+          duration: typeof s.duration === "number" ? s.duration : 0,
+          rawDuration: typeof s.rawDuration === "number" ? s.rawDuration : (typeof s.duration === "number" ? s.duration : 0),
+          trimStart: typeof s.trimStart === "number" ? s.trimStart : 0,
+          trimEnd: typeof s.trimEnd === "number" ? s.trimEnd : 0,
+          trimEnabled: s.trimEnabled !== false,
+          skipSegments: Array.isArray(s.skipSegments) ? s.skipSegments : [],
+          gainDb: typeof s.gainDb === "number" ? s.gainDb : 0,
+          isLiked: Boolean(s.isLiked),
+          playCount: safePlays,
+          totalTimeListened: Math.round(safeTime * 100) / 100,
+          dateAdded: s.dateAdded || 0,
+          statsIsolated: Boolean(s.statsIsolated),
+          needsReview: Boolean(s.needsReview)
+        };
+      });
+
+    return {
+      version: 2,
+      updatedAt: Date.now(),
+      appVersion: CURRENT_APP_VERSION,
+      songs: serializedSongs,
+      playlists: Array.isArray(playlists) ? playlists : [],
+      lyrics: allLyrics,
+      listeningLogs: typeof getListeningLogs === "function" ? getListeningLogs() : [],
+      songStatsLedgerV2: typeof getSongStatsLedger === "function" ? getSongStatsLedger() : { canonical: {}, bySongId: {} },
+      deletedSongIds: typeof getDeletedSongIds === "function" ? Array.from(getDeletedSongIds()) : [],
+      archivedHistorySeconds: parseFloat(localStorage.getItem("spotilocal_archived_secs") || "0") || 0
+    };
+  }
+
+  function loadNativeDurableBackup() {
+    try {
+      const np = (typeof window !== "undefined" && window.SpotiLocalNativePlayer) ? window.SpotiLocalNativePlayer : null;
+      if (!np || typeof np.loadDurableBackup !== "function") return null;
+      const raw = np.loadDurableBackup();
+      if (!raw || typeof raw !== "string") return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return null;
+      if (parsed.explicitlyCleared && (!Array.isArray(parsed.songs) || parsed.songs.length === 0)) {
+        return null;
+      }
+      return parsed;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function flushDurableBackupNow(forceAllowEmpty = false) {
+    try {
+      if (!_libraryInitialHydrationDone && !forceAllowEmpty) return false;
+      const np = (typeof window !== "undefined" && window.SpotiLocalNativePlayer) ? window.SpotiLocalNativePlayer : null;
+      if (!np || typeof np.saveDurableBackup !== "function") return false;
+      if ((!songs || songs.length === 0) && !forceAllowEmpty) {
+        const existing = loadNativeDurableBackup();
+        if (existing && Array.isArray(existing.songs) && existing.songs.length > 0) {
+          return false;
+        }
+      }
+      const payload = await buildDurableBackupPayload(songs);
+      return Boolean(np.saveDurableBackup(JSON.stringify(payload)));
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function scheduleDurableBackup() {
+    if (_durableBackupTimer) return;
+    _durableBackupTimer = setTimeout(() => {
+      _durableBackupTimer = null;
+      flushDurableBackupNow(false).catch(() => {});
+    }, 3000);
+  }
+
+  async function applyExternalBackupPayload(payload, options = {}) {
+    if (!payload || typeof payload !== "object") return { restoredSongs: 0 };
+    let restoredSongs = 0;
+
+    try {
+      if (Array.isArray(payload.deletedSongIds) && payload.deletedSongIds.length > 0) {
+        const delSet = getDeletedSongIds();
+        let delChanged = false;
+        for (const did of payload.deletedSongIds) {
+          const cleanDid = String(did || "").toLowerCase().trim();
+          if (cleanDid && !delSet.has(cleanDid)) {
+            delSet.add(cleanDid);
+            delChanged = true;
+          }
+        }
+        if (delChanged) {
+          const arr = Array.from(delSet);
+          try { localStorage.setItem("spotilocal_deleted_song_ids", JSON.stringify(arr)); } catch (e) {}
+          if (typeof musicDB !== "undefined" && musicDB.setSetting) {
+            await musicDB.setSetting("deleted_song_ids", arr).catch(() => {});
+          }
+        }
+      }
+    } catch (e) {}
+
+    try {
+      const incomingArchived = Number(payload.archivedHistorySeconds) || 0;
+      const curArchived = parseFloat(localStorage.getItem("spotilocal_archived_secs") || "0") || 0;
+      if (incomingArchived > curArchived) {
+        localStorage.setItem("spotilocal_archived_secs", String(incomingArchived));
+        if (typeof musicDB !== "undefined" && musicDB.setSetting) {
+          await musicDB.setSetting("archivedHistorySeconds", incomingArchived).catch(() => {});
+        }
+      }
+    } catch (e) {}
+
+    try {
+      if (Array.isArray(payload.listeningLogs) && payload.listeningLogs.length > 0) {
+        const currentLogs = getListeningLogs();
+        const mergedLogs = (typeof mergeListeningLogSources === "function")
+          ? mergeListeningLogSources(currentLogs, payload.listeningLogs)
+          : coalesceListeningLogs([...currentLogs, ...payload.listeningLogs]);
+        const capped = mergedLogs.slice(-25000);
+        _listeningLogsCache = capped;
+        localStorage.setItem("spotilocal_listening_logs", JSON.stringify(capped));
+        if (typeof musicDB !== "undefined" && musicDB.setSetting) {
+          await musicDB.setSetting("listeningLogs", capped).catch(() => {});
+        }
+        invalidateStatsIndex();
+      }
+    } catch (e) {}
+
+    try {
+      const incomingLedger = payload.songStatsLedgerV2 || payload.songStatsLedger;
+      if (incomingLedger && typeof incomingLedger === "object" && options.allowStatsRestore !== false) {
+        const mem = getSongStatsLedger();
+        let ledgerChanged = false;
+        if (incomingLedger.canonical) {
+          for (const k in incomingLedger.canonical) {
+            if (!k || (!k.startsWith("id:::") && isUnsafeSharedCanonicalKey(k))) continue;
+            const remote = incomingLedger.canonical[k];
+            if (!remote) continue;
+            const local = mem.canonical[k];
+            if (!local) {
+              mem.canonical[k] = { ...remote };
+              ledgerChanged = true;
+            } else {
+              const maxSecs = Math.max(Number(local.totalTimeListened) || 0, Number(remote.totalTimeListened) || 0);
+              const maxPlays = Math.max(Number(local.playCount) || 0, Number(remote.playCount) || 0);
+              if (maxSecs > (local.totalTimeListened || 0) || maxPlays > (local.playCount || 0)) {
+                local.totalTimeListened = maxSecs;
+                local.playCount = maxPlays;
+                local.lastUpdated = Math.max(local.lastUpdated || 0, remote.lastUpdated || 0);
+                ledgerChanged = true;
+              }
+            }
+          }
+        }
+        if (incomingLedger.bySongId) {
+          for (const sid in incomingLedger.bySongId) {
+            const mk = incomingLedger.bySongId[sid];
+            if (!mk || (!String(mk).startsWith("id:::") && isUnsafeSharedCanonicalKey(mk))) continue;
+            if (!mem.bySongId[sid]) {
+              mem.bySongId[sid] = mk;
+              ledgerChanged = true;
+            }
+          }
+        }
+        if (ledgerChanged) {
+          localStorage.setItem(SONG_STATS_LEDGER_LS_KEY, JSON.stringify(mem));
+          if (typeof musicDB !== "undefined" && musicDB.saveSongStatsLedger) {
+            await musicDB.saveSongStatsLedger(mem, SONG_STATS_LEDGER_DB_KEY).catch(() => {});
+          }
+        }
+      }
+    } catch (e) {}
+
+    try {
+      if (Array.isArray(payload.playlists) && payload.playlists.length > 0) {
+        const existingPlaylists = (typeof musicDB !== "undefined" && musicDB.getAllPlaylists)
+          ? (await musicDB.getAllPlaylists().catch(() => []))
+          : [];
+        const byPlId = new Map();
+        for (const pl of existingPlaylists) {
+          if (pl && pl.id) byPlId.set(pl.id, pl);
+        }
+        for (const bpl of payload.playlists) {
+          if (!bpl || !bpl.id) continue;
+          const cur = byPlId.get(bpl.id);
+          if (!cur) {
+            if (typeof musicDB !== "undefined" && musicDB.savePlaylist) {
+              await musicDB.savePlaylist(bpl).catch(() => {});
+            }
+          } else {
+            const mergedIds = Array.from(new Set([...(cur.songIds || []), ...(bpl.songIds || [])]));
+            if (mergedIds.length > (cur.songIds || []).length || (bpl.totalTimeListened || 0) > (cur.totalTimeListened || 0)) {
+              cur.songIds = mergedIds;
+              cur.totalTimeListened = Math.max(cur.totalTimeListened || 0, bpl.totalTimeListened || 0);
+              if (typeof musicDB !== "undefined" && musicDB.savePlaylist) {
+                await musicDB.savePlaylist(cur).catch(() => {});
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    try {
+      if (payload.lyrics && typeof payload.lyrics === "object" && typeof musicDB !== "undefined" && musicDB.saveLyrics) {
+        for (const sid in payload.lyrics) {
+          const text = payload.lyrics[sid];
+          if (!sid || !text) continue;
+          const existing = musicDB.getLyrics ? await musicDB.getLyrics(sid).catch(() => null) : null;
+          if (!existing) {
+            await musicDB.saveLyrics(sid, text).catch(() => {});
+          }
+        }
+      }
+    } catch (e) {}
+
+    if (!options.skipSongs && Array.isArray(payload.songs) && payload.songs.length > 0) {
+      let existingBlobKeys = new Set();
+      try {
+        if (typeof musicDB !== "undefined" && musicDB.getAllBlobKeys) {
+          existingBlobKeys = new Set((await musicDB.getAllBlobKeys()) || []);
+        }
+      } catch (e) {}
+      const np = (typeof window !== "undefined" && window.SpotiLocalNativePlayer) ? window.SpotiLocalNativePlayer : null;
+      const targetMap = options.intoSongMap instanceof Map ? options.intoSongMap : null;
+
+      for (const bs of payload.songs) {
+        if (!bs || !bs.id || isSongDeleted(bs.id, bs.title)) continue;
+        if (targetMap && targetMap.has(bs.id)) continue;
+
+        let hasNativeFile = false;
+        let resolvedNativeFileName = bs.nativeFileName || null;
+        if (np && typeof np.getLocalAudioInfo === "function") {
+          const candidates = [bs.id, bs.nativeAudioKey, bs.nativeAudioHash, bs.nativeFileName].filter(Boolean);
+          for (const ck of candidates) {
+            try {
+              const raw = np.getLocalAudioInfo(ck);
+              const info = raw ? JSON.parse(raw) : null;
+              if (info && info.exists && info.size > 0) {
+                hasNativeFile = true;
+                resolvedNativeFileName = info.name || resolvedNativeFileName;
+                break;
+              }
+            } catch (e) {}
+          }
+        } else if (np && typeof np.hasLocalAudio === "function") {
+          const candidates = [bs.id, bs.nativeAudioKey, bs.nativeAudioHash, bs.nativeFileName].filter(Boolean);
+          for (const ck of candidates) {
+            try {
+              if (np.hasLocalAudio(ck, bs.nativeAudioExt || "")) {
+                hasNativeFile = true;
+                break;
+              }
+            } catch (e) {}
+          }
+        }
+
+        const hasAudioSource = Boolean(
+          existingBlobKeys.has(bs.id) ||
+          hasNativeFile ||
+          bs.audioUrl ||
+          options.forceMetadataImport
+        );
+        if (!hasAudioSource) continue;
+
+        const restored = {
+          ...bs,
+          audioBlob: null,
+          coverBlob: null,
+          hasAudioBlob: Boolean(existingBlobKeys.has(bs.id) || hasNativeFile || bs.hasAudioBlob),
+          nativeFileName: resolvedNativeFileName,
+          playCount: Math.max(0, Number(bs.playCount) || 0),
+          totalTimeListened: Math.max(0, Number(bs.totalTimeListened) || 0),
+          dateAdded: Number(bs.dateAdded) || 0
+        };
+
+        if (targetMap) {
+          targetMap.set(restored.id, restored);
+        }
+        try {
+          if (typeof musicDB !== "undefined" && musicDB.saveSong) {
+            await musicDB.saveSong(restored);
+          }
+        } catch (e) {}
+        restoredSongs++;
+      }
+    }
+
+    return { restoredSongs };
+  }
+
+  function rebindQueueToLiveSongs() {
+    if (!Array.isArray(songs) || songs.length === 0) return;
+    const byId = new Map();
+    for (let i = 0; i < songs.length; i++) {
+      if (songs[i] && songs[i].id) byId.set(songs[i].id, songs[i]);
+    }
+    if (!Array.isArray(currentQueue) || currentQueue.length === 0) {
+      currentQueue = [...songs];
+      return;
+    }
+    currentQueue = currentQueue.map(q => (q && q.id && byId.has(q.id)) ? byId.get(q.id) : q);
+    if (Array.isArray(pendingQueue) && pendingQueue.length > 0) {
+      pendingQueue = pendingQueue.map(q => (q && q.id && byId.has(q.id)) ? byId.get(q.id) : q);
+    }
   }
 
   async function repairAndRecoverLibrary(isManual = false) {
@@ -2314,121 +3273,84 @@ async function initSpotiLocalApp() {
     let statsRestoredCount = 0;
     let blobsFoundCount = 0;
 
+    pruneLegacyTitleBlacklist();
     await restoreListeningLogsFromDB().catch(() => {});
     await restoreSongStatsLedgerFromDB().catch(() => {});
 
-    // 1. Gather all existing songs in IndexedDB and in memory
+    // 1. Gather all existing songs in IndexedDB and in memory (excluding dead phantom logs)
     let dbSongs = [];
     try {
+      if (typeof musicDB !== "undefined" && musicDB.migrateEmbeddedAudioBlobs) {
+        await musicDB.migrateEmbeddedAudioBlobs(5);
+      }
       dbSongs = await musicDB.getAllSongs() || [];
     } catch (e) {}
 
     const songMap = new Map();
-    dbSongs.forEach(s => {
-      if (s && s.id && !isSongDeleted(s.id, s.title)) songMap.set(s.id, s);
-    });
+    for (const s of dbSongs) {
+      if (!s || !s.id || isSongDeleted(s.id)) continue;
+      if (await isGhostSongWithoutAudio(s)) {
+        try { if (musicDB.deleteSong) await musicDB.deleteSong(s.id); } catch (e) {}
+        continue;
+      }
+      songMap.set(s.id, s);
+    }
 
-    songs.forEach(s => {
-      if (s && s.id && !songMap.has(s.id) && !isSongDeleted(s.id, s.title)) songMap.set(s.id, s);
-    });
+    for (const s of songs) {
+      if (!s || !s.id || songMap.has(s.id) || isSongDeleted(s.id)) continue;
+      if (await isGhostSongWithoutAudio(s)) continue;
+      songMap.set(s.id, s);
+    }
 
-    // 2. Scan localStorage cached songs for any missing entries
+    // 1b. Recover missing songs/metadata/playlists/lyrics from Native Durable Backup first!
+    const nativeBackup = loadNativeDurableBackup();
+    if (nativeBackup) {
+      try {
+        const resBackup = await applyExternalBackupPayload(nativeBackup, { intoSongMap: songMap });
+        recoveredCount += (resBackup && resBackup.restoredSongs) || 0;
+      } catch (e) {}
+    }
+
+    // 2. Scan localStorage cached songs for any missing entries with real sources
     try {
       const rawCached = localStorage.getItem("spotilocal_cached_songs");
       if (rawCached) {
         const cachedList = JSON.parse(rawCached);
         if (Array.isArray(cachedList)) {
-          cachedList.forEach(cs => {
-            if (cs && cs.id && !songMap.has(cs.id) && !isSongDeleted(cs.id, cs.title)) {
-              songMap.set(cs.id, {
-                ...cs,
-                audioBlob: null,
-                coverBlob: null,
-                dateAdded: cs.dateAdded || Date.now()
-              });
-              recoveredCount++;
-            }
-          });
+          for (const cs of cachedList) {
+            if (!cs || !cs.id || songMap.has(cs.id) || isSongDeleted(cs.id)) continue;
+            if (await isGhostSongWithoutAudio(cs)) continue;
+            songMap.set(cs.id, {
+              ...cs,
+              audioBlob: null,
+              coverBlob: null,
+              dateAdded: cs.dateAdded || Date.now()
+            });
+            recoveredCount++;
+          }
         }
       }
     } catch (e) {}
 
-    // 3. Scan song_blobs in IndexedDB (Recovers user-uploaded songs whose audio blobs are intact!)
+    // 3. Scan song_blobs keys in IndexedDB (Recovers user-uploaded songs without IPC OOM!)
     try {
-      if (typeof musicDB !== "undefined" && musicDB.getAllBlobRecords) {
-        const blobRecords = await musicDB.getAllBlobRecords();
-        blobsFoundCount = blobRecords.length;
-        console.log(`Deep forensic rescue: found ${blobRecords.length} records in song_blobs`);
+      if (typeof musicDB !== "undefined" && musicDB.getAllBlobKeys) {
+        const blobKeys = await musicDB.getAllBlobKeys();
+        blobsFoundCount = blobKeys.length;
 
-        for (const rec of blobRecords) {
-          if (!rec || !rec.id) continue;
-          if (isSongDeleted(rec.id)) {
-            // Clean up blacklisted blob from storage
-            try {
-              if (musicDB.deleteSong) musicDB.deleteSong(rec.id).catch(() => {});
-            } catch(e) {}
+        for (const blobId of blobKeys) {
+          if (!blobId) continue;
+          if (isSongDeleted(blobId)) {
+            try { if (musicDB.deleteSong) musicDB.deleteSong(blobId).catch(() => {}); } catch (e) {}
             continue;
           }
-          const blob = rec.audioBlob;
-          const isRealBlob = (blob instanceof Blob);
-
-          let existing = songMap.get(rec.id);
+          const existing = songMap.get(blobId);
           if (!existing) {
-            let meta = {
-              title: "",
-              artist: "Artista Local",
-              album: "Música en Móvil",
-              year: "2026",
-              genre: "Audio Local",
-              coverBlob: null
-            };
-
-            if (isRealBlob) {
-              try {
-                const parsed = await ID3Parser.parse(blob);
-                if (parsed) {
-                  if (parsed.title && parsed.title !== "Canción") meta.title = parsed.title;
-                  if (parsed.artist && parsed.artist !== "Artista Desconocido") meta.artist = parsed.artist;
-                  if (parsed.album && parsed.album !== "Álbum Desconocido") meta.album = parsed.album;
-                  if (parsed.year) meta.year = parsed.year;
-                  if (parsed.genre) meta.genre = parsed.genre;
-                  if (parsed.coverBlob) meta.coverBlob = parsed.coverBlob;
-                }
-              } catch(e) {}
-            }
-
-            const presetMatch = findPresetForSong({ id: rec.id });
-            if (presetMatch) {
-              meta.title = presetMatch.title;
-              meta.artist = presetMatch.artist;
-              meta.album = presetMatch.album;
-              meta.year = presetMatch.year;
-              meta.genre = presetMatch.genre;
-            } else if (!meta.title) {
-              meta.title = (isRealBlob && blob.name ? blob.name.replace(/\.[^/.]+$/, "") : `Tema Local (${rec.id.slice(-6)})`);
-            }
-
-            const ledgerStats = getSongLedgerStats({ id: rec.id, title: meta.title, artist: meta.artist });
-            const restoredSong = {
-              id: rec.id,
-              title: meta.title,
-              artist: meta.artist,
-              album: meta.album,
-              year: meta.year,
-              genre: meta.genre,
-              audioBlob: null,
-              hasAudioBlob: isRealBlob,
-              coverBlob: meta.coverBlob,
-              isLiked: false,
-              playCount: ledgerStats.playCount || 0,
-              totalTimeListened: ledgerStats.totalTimeListened || 0,
-              dateAdded: Date.now() - (7 * 86400 * 1000)
-            };
-
-            songMap.set(rec.id, restoredSong);
+            const restoredSong = await recoverSongEntryFromBlobId(blobId);
+            songMap.set(blobId, restoredSong);
             recoveredCount++;
           } else {
-            if (isRealBlob) existing.hasAudioBlob = true;
+            existing.hasAudioBlob = true;
           }
         }
       }
@@ -2436,86 +3358,135 @@ async function initSpotiLocalApp() {
       console.warn("Forensic song_blobs scan error:", e);
     }
 
-    // 4. Scan spotilocal_listening_logs for any orphan song IDs with accumulated listening history
-    const logs = getListeningLogs();
-    const songIdsInLogs = new Set();
-    logs.forEach(l => {
-      if (l && l.songId && !isSongDeleted(l.songId)) songIdsInLogs.add(String(l.songId));
-    });
-
-    for (const logSongId of songIdsInLogs) {
-      if (!songMap.has(logSongId) && !isSongDeleted(logSongId)) {
-        const presetMatch = findPresetForSong({ id: logSongId });
-        let title = presetMatch ? presetMatch.title : `Canción Histórica (${logSongId.slice(-6)})`;
-        let artist = presetMatch ? presetMatch.artist : "Artista Local";
-        let album = presetMatch ? presetMatch.album : "Música en Móvil";
-        let year = presetMatch ? presetMatch.year : "2026";
-        let genre = presetMatch ? presetMatch.genre : "Audio Local";
-
-        let blob = null;
-        try {
-          if (typeof musicDB !== "undefined" && musicDB.getAudioBlob) {
-            blob = await musicDB.getAudioBlob(logSongId);
-          }
-        } catch(e) {}
-
-        if (!blob) {
-          blob = await getBlobFromAnySource({ id: logSongId });
-        }
-
-        let coverBlob = null;
-        if (blob instanceof Blob) {
-          try {
-            const parsed = await ID3Parser.parse(blob);
-            if (parsed) {
-              if (parsed.title && parsed.title !== "Canción" && !isGenericSongTitle(parsed.title)) title = parsed.title;
-              if (parsed.artist && parsed.artist !== "Artista Desconocido") artist = parsed.artist;
-              if (parsed.album && parsed.album !== "Álbum Desconocido") album = parsed.album;
-              if (parsed.year) year = parsed.year;
-              if (parsed.genre) genre = parsed.genre;
-              if (parsed.coverBlob instanceof Blob) coverBlob = parsed.coverBlob;
+    // 4. Scan NativeAudioStore (files/native-audio/<sha256>.<ext>) safely without false orphans or 40MB bridge bloat
+    const nativePlayer = (typeof window !== "undefined" && window.SpotiLocalNativePlayer) ? window.SpotiLocalNativePlayer : null;
+    if (nativePlayer && typeof nativePlayer.listLocalAudioFiles === "function") {
+      try {
+        const matchedNativeNames = new Set();
+        if (typeof nativePlayer.getLocalAudioInfo === "function") {
+          for (const s of songMap.values()) {
+            const candidates = [getNativeAudioKey(s), s.id, s.nativeFileName].filter(Boolean);
+            for (const ck of candidates) {
+              try {
+                const rawInfo = nativePlayer.getLocalAudioInfo(ck);
+                const info = rawInfo ? JSON.parse(rawInfo) : null;
+                if (info && info.exists && info.name) matchedNativeNames.add(info.name);
+              } catch (e) {}
             }
-          } catch(e) {}
+          }
         }
 
-        const isUnidentified = isGenericSongTitle(title) && !presetMatch;
-        if (isUnidentified) {
-          title = `Sin identificar (${logSongId.slice(-6)})`;
+        const backupByHash = new Map();
+        if (nativeBackup && Array.isArray(nativeBackup.songs)) {
+          for (const bs of nativeBackup.songs) {
+            if (bs && bs.nativeAudioHash) backupByHash.set(String(bs.nativeAudioHash).toLowerCase(), bs);
+          }
         }
 
-        const ledgerStats = getSongLedgerStats({ id: logSongId, title: title, artist: artist });
-        const restored = {
-          id: logSongId,
-          title: title,
-          artist: artist,
-          album: album,
-          year: year,
-          genre: genre,
-          audioBlob: (blob instanceof Blob) ? blob : null,
-          audioUrl: presetMatch ? getFullUrl(`/songs/${encodeURIComponent(presetMatch.filename)}`) : null,
-          hasAudioBlob: Boolean(blob),
-          coverBlob: coverBlob,
-          needsReview: isUnidentified,
-          isLiked: false,
-          playCount: ledgerStats.playCount || 0,
-          totalTimeListened: ledgerStats.totalTimeListened || 0,
-          dateAdded: Date.now() - (14 * 86400 * 1000)
-        };
-        songMap.set(logSongId, restored);
-        recoveredCount++;
+        const nativeFiles = JSON.parse(nativePlayer.listLocalAudioFiles() || "[]") || [];
+        const knownMetaSet = new Set(
+          Array.from(songMap.values())
+            .filter(s => s && s.title && !isGenericSongTitle(s.title) && s.artist && !isGenericArtistName(s.artist))
+            .map(s => `${normalizeStrictMeta(s.artist)}:::${normalizeStrictMeta(s.title)}`)
+        );
+
+        for (const f of nativeFiles) {
+          if (!f || !f.name || matchedNativeNames.has(f.name) || isSongDeleted(f.name)) continue;
+          const dotIdx = f.name.lastIndexOf(".");
+          const fileBaseHash = (dotIdx > 0 ? f.name.slice(0, dotIdx) : f.name).toLowerCase();
+          const ext = dotIdx > 0 ? f.name.slice(dotIdx + 1).toLowerCase() : "mp3";
+
+          const backedSong = backupByHash.get(fileBaseHash);
+          if (backedSong) {
+            if (isSongDeleted(backedSong.id, backedSong.title) || songMap.has(backedSong.id)) continue;
+          }
+
+          const headerBlob = await fetchHeaderBlobFromNativePlayer(f.name, f.size || 0, ext);
+          let title = "";
+          let artist = "Artista Local";
+          let album = "Música en Móvil";
+          let year = "2026";
+          let genre = "Audio Local";
+          let coverBlob = null;
+
+          if (headerBlob instanceof Blob && headerBlob.size > 0) {
+            try {
+              const parsed = await ID3Parser.parse(headerBlob);
+              if (parsed) {
+                if (parsed.title && !isGenericSongTitle(parsed.title)) title = parsed.title;
+                if (parsed.artist && !isGenericArtistName(parsed.artist)) artist = parsed.artist;
+                if (parsed.album && parsed.album !== "Álbum Desconocido") album = parsed.album;
+                if (parsed.year) year = parsed.year;
+                if (parsed.genre) genre = parsed.genre;
+                if (parsed.coverBlob instanceof Blob) coverBlob = parsed.coverBlob;
+              }
+            } catch (e) {}
+            if (!title) {
+              const presetBySize = CANONICAL_PRESET_BY_SIZE.find(p => Math.abs(p.size - (f.size || 0)) <= 512);
+              if (presetBySize) {
+                title = presetBySize.title;
+                artist = presetBySize.artist;
+                album = presetBySize.album;
+                year = presetBySize.year;
+                genre = presetBySize.genre;
+              }
+            }
+          }
+
+          if (title && !isGenericSongTitle(title) && !isGenericArtistName(artist)) {
+            const metaKey = `${normalizeStrictMeta(artist)}:::${normalizeStrictMeta(title)}`;
+            if (knownMetaSet.has(metaKey)) {
+              continue;
+            }
+          }
+
+          const baseId = (backedSong && backedSong.id) ? backedSong.id : `native_${fileBaseHash}`;
+          if (songMap.has(baseId) || isSongDeleted(baseId)) continue;
+
+          if (!title) title = (backedSong && backedSong.title) ? backedSong.title : `Tema Local (${f.name.slice(0, 6)})`;
+          if (backedSong && backedSong.artist && isGenericArtistName(artist)) artist = backedSong.artist;
+
+          const exactStats = calculateSongStatsFromLogs(baseId, title, artist, 0, { strictIdOnly: true });
+          const restoredNative = {
+            id: baseId,
+            title,
+            artist,
+            album,
+            year,
+            genre,
+            audioBlob: null,
+            hasAudioBlob: true,
+            nativeFileName: f.name,
+            coverBlob,
+            needsReview: isGenericSongTitle(title),
+            isLiked: backedSong ? Boolean(backedSong.isLiked) : false,
+            statsIsolated: backedSong ? Boolean(backedSong.statsIsolated) : isGenericArtistName(artist),
+            playCount: exactStats.playCount || 0,
+            totalTimeListened: exactStats.totalSeconds || 0,
+            dateAdded: (backedSong && backedSong.dateAdded) || (Date.now() - (7 * 86400 * 1000))
+          };
+          songMap.set(baseId, restoredNative);
+          if (!isGenericSongTitle(title) && !isGenericArtistName(artist)) {
+            knownMetaSet.add(`${normalizeStrictMeta(artist)}:::${normalizeStrictMeta(title)}`);
+          }
+          recoveredCount++;
+        }
+      } catch (e) {
+        console.warn("Forensic native-audio scan error:", e);
       }
     }
 
-    // 5. Check all canonical preset songs
+    // 5. Check all canonical preset songs (only if not deleted and missing)
     for (const preset of CANONICAL_PRESET_SONGS) {
       const canonicalId = `folder_${preset.filename}`;
-      if (isSongDeleted(canonicalId, preset.title)) continue;
+      if (isSongDeleted(canonicalId)) continue;
 
       let existingSong = songMap.get(canonicalId);
-
       if (!existingSong) {
-        for (const [id, s] of songMap.entries()) {
-          if (s.title && s.title.toLowerCase().trim() === preset.title.toLowerCase().trim()) {
+        const presetNorm = normalizeStrictMeta(preset.title);
+        const presetArtistNorm = normalizeStrictMeta(preset.artist);
+        for (const s of songMap.values()) {
+          if (s.title && normalizeStrictMeta(s.title) === presetNorm && (!s.artist || isGenericArtistName(s.artist) || normalizeStrictMeta(s.artist) === presetArtistNorm)) {
             existingSong = s;
             break;
           }
@@ -2523,8 +3494,9 @@ async function initSpotiLocalApp() {
       }
 
       if (!existingSong) {
+        const exactStats = calculateSongStatsFromLogs(canonicalId, preset.title, preset.artist);
         const ledgerStats = getSongLedgerStats({ id: canonicalId, title: preset.title, artist: preset.artist });
-        const restored = {
+        songMap.set(canonicalId, {
           id: canonicalId,
           title: preset.title,
           artist: preset.artist,
@@ -2535,63 +3507,32 @@ async function initSpotiLocalApp() {
           audioBlob: null,
           coverBlob: null,
           isLiked: false,
-          playCount: ledgerStats.playCount || 0,
-          totalTimeListened: ledgerStats.totalTimeListened || 0,
+          playCount: Math.max(ledgerStats.playCount || 0, exactStats.playCount || 0),
+          totalTimeListened: Math.max(ledgerStats.totalTimeListened || 0, exactStats.totalSeconds || 0),
           dateAdded: Date.now() - (30 * 86400 * 1000)
-        };
-        songMap.set(canonicalId, restored);
+        });
         recoveredCount++;
-      } else {
-        // Heal generic titles if present
-        if (!existingSong.title || existingSong.title.includes("Canción Histórica") || existingSong.title.includes("Canción Recuperada")) {
-          existingSong.title = preset.title;
-          existingSong.artist = preset.artist;
-          existingSong.album = preset.album;
-          existingSong.year = preset.year;
-          existingSong.genre = preset.genre;
-          if (!existingSong.audioUrl) existingSong.audioUrl = getFullUrl(`/songs/${encodeURIComponent(preset.filename)}`);
-        }
       }
     }
 
-    // 6. Enforce Monotonic Immunity and recalculate from logs only if higher
-    for (const [id, song] of songMap.entries()) {
-      if (isSongDeleted(song.id, song.title)) {
-        songMap.delete(id);
-        continue;
-      }
-      const stats = calculateSongStatsFromLogs(song.id, song.title, song.artist);
-      const ledgerStats = getSongLedgerStats(song);
+    // 6. Sanitize any inflated stats and persist clean records
+    const candidateSongs = Array.from(songMap.values()).filter(s => !isSongDeleted(s.id));
+    const sanitizedCount = await sanitizeCorruptedSongStats(candidateSongs);
+    if (sanitizedCount > 0) statsRestoredCount += sanitizedCount;
 
-      const maxSecs = Math.max(song.totalTimeListened || 0, ledgerStats.totalTimeListened || 0, stats.totalSeconds || 0);
-      const maxPlays = Math.max(song.playCount || 0, ledgerStats.playCount || 0, stats.playCount || 0);
-
-      let changed = false;
-      if (maxSecs > (song.totalTimeListened || 0)) {
-        song.totalTimeListened = maxSecs;
-        changed = true;
-      }
-      if (maxPlays > (song.playCount || 0)) {
-        song.playCount = maxPlays;
-        changed = true;
-      }
-
-      // Stamp highest value into immutable ledger
-      recordSongLedgerMonotonic(song, 0, 0);
-
-      if (changed) {
-        statsRestoredCount++;
-      }
-
+    for (const song of candidateSongs) {
       try {
-        await musicDB.saveSong(song);
+        await musicDB.saveSong(song, song._forceExactStats ? { forceExactStats: true } : {});
+        delete song._forceExactStats;
       } catch (e) {}
     }
 
     // 7. Update memory and UI
-    songs = Array.from(songMap.values()).filter(s => !isSongDeleted(s.id, s.title));
+    songs = candidateSongs;
     songs.sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0));
-    currentQueue = [...songs];
+    rebindQueueToLiveSongs();
+    _libraryInitialHydrationDone = true;
+    if (typeof flushUnappliedNativeStats === "function") flushUnappliedNativeStats();
 
     // Reset library filter to all
     currentLibraryFilter = "all";
@@ -2601,6 +3542,7 @@ async function initSpotiLocalApp() {
     });
 
     _libraryTableDirty = true;
+    invalidateStatsIndex();
     renderSongsTable(songs);
     renderRecentGrid(songs.slice(0, 6));
     renderFavoritesGrid(songs.filter(s => s.isLiked));
@@ -2612,11 +3554,12 @@ async function initSpotiLocalApp() {
     }
 
     saveCachedSongs(songs);
+    scheduleDurableBackup();
     if (typeof hydrateCoverArt === "function") hydrateCoverArt(songs);
 
-    const statusMsg = `🔍 Escaneo Forense: ${songs.length} canciones activas (${recoveredCount} recuperadas, ${blobsFoundCount} blobs en disco, ${statsRestoredCount} estadísticas vinculadas).`;
+    const statusMsg = `🔍 Escaneo Forense: ${songs.length} canciones (${recoveredCount} recuperadas, ${blobsFoundCount} blobs, ${sanitizedCount} estadísticas saneadas).`;
     console.log(statusMsg);
-    if (isManual || recoveredCount > 0) {
+    if (isManual || recoveredCount > 0 || sanitizedCount > 0) {
       if (typeof showToast === "function") {
         showToast(statusMsg);
       }
@@ -2626,7 +3569,7 @@ async function initSpotiLocalApp() {
   }
 
   window.repairAndRecoverLibraryUI = async function() {
-    if (confirm("🔍 ¿Deseas ejecutar el Escaneo Forense Profundo para rastrear y recuperar TODAS las canciones y blobs de audio almacenados en tu móvil?")) {
+    if (confirm("🔍 ¿Deseas ejecutar el Escaneo Forense Profundo para rastrear y recuperar TODAS las canciones almacenadas en tu móvil?")) {
       await repairAndRecoverLibrary(true);
     }
   };
@@ -2634,8 +3577,16 @@ async function initSpotiLocalApp() {
   async function loadSongsFromDB(statusCb = null) {
     try {
       if (statusCb) statusCb("Cargando memoria local...");
-      restoreListeningLogsFromDB().catch(() => {});
-      restoreSongStatsLedgerFromDB().catch(() => {});
+      pruneLegacyTitleBlacklist();
+      purgeLegacyArtificialStats();
+
+      // Load Native Durable Backup early so deleted IDs, archived secs, and logs merge before DB reads
+      const nativeBackup = (typeof loadNativeDurableBackup === "function") ? loadNativeDurableBackup() : null;
+      if (nativeBackup) {
+        try {
+          await applyExternalBackupPayload(nativeBackup, { allowStatsRestore: false, skipSongs: true });
+        } catch (e) {}
+      }
 
       let localCachedSongs = [];
       // 0. Instant Synchronous First-Paint from localStorage (0.00ms)
@@ -2644,7 +3595,7 @@ async function initSpotiLocalApp() {
         if (cached) {
           const parsed = JSON.parse(cached);
           if (parsed && parsed.length > 0 && songs.length === 0) {
-            const valid = parsed.filter(s => !isSongDeleted(s.id, s.title));
+            const valid = parsed.filter(s => !isSongDeleted(s.id));
             if (valid.length > 0) {
               valid.forEach(s => {
                 if (s.coverBlob && !(s.coverBlob instanceof Blob) && !(s.coverBlob instanceof File)) {
@@ -2653,7 +3604,7 @@ async function initSpotiLocalApp() {
               });
               localCachedSongs = valid;
               songs = valid;
-              if (currentQueue.length === 0) currentQueue = [...songs];
+              rebindQueueToLiveSongs();
               if (currentTab === "library") {
                 renderSongsTable(songs);
                 _libraryTableDirty = false;
@@ -2669,33 +3620,72 @@ async function initSpotiLocalApp() {
         }
       } catch (e) {}
 
-      // Ensure listening logs and persisted stats index are fully hydrated before DB reads & repairs
+      // Ensure listening logs and stats ledger are hydrated before DB reads
       await restoreListeningLogsFromDB().catch(() => {});
-    await restoreSongStatsLedgerFromDB().catch(() => {});
+      await restoreSongStatsLedgerFromDB().catch(() => {});
 
-      // 1. Read IndexedDB songs
+      // Migrate any legacy embedded audio blobs first so songs store stays lightweight
+      try {
+        if (typeof musicDB !== "undefined" && musicDB.migrateEmbeddedAudioBlobs) {
+          await musicDB.migrateEmbeddedAudioBlobs(5);
+        }
+      } catch (e) {}
+
+      // 1. Read IndexedDB songs safely (key-by-key in db.js so IPC limits can never truncate to [])
       let dbSongs = [];
       try {
         const allDb = await musicDB.getAllSongs() || [];
-        dbSongs = allDb.filter(s => !isSongDeleted(s.id, s.title));
+        for (const s of allDb) {
+          if (!s || !s.id || isSongDeleted(s.id)) continue;
+          if (await isGhostSongWithoutAudio(s)) {
+            try { if (musicDB.deleteSong) await musicDB.deleteSong(s.id); } catch (e) {}
+            continue;
+          }
+          dbSongs.push(s);
+        }
+      } catch (e) {}
+
+      // 1b. Reconcile against Native Durable Backup in case WebView evicted all or partial IndexedDB rows
+      if (nativeBackup && Array.isArray(nativeBackup.songs) && nativeBackup.songs.length > 0) {
+        try {
+          const dbMap = new Map(dbSongs.map(s => [s.id, s]));
+          const backupRes = await applyExternalBackupPayload(nativeBackup, { intoSongMap: dbMap, allowStatsRestore: true });
+          if (backupRes && backupRes.restoredSongs > 0) {
+            dbSongs = Array.from(dbMap.values());
+          }
+        } catch (e) {}
+      }
+
+      // Also check song_blobs keys so no locally stored audio blob is ever missing from songs list
+      try {
+        if (typeof musicDB !== "undefined" && musicDB.getAllBlobKeys) {
+          const blobKeys = await musicDB.getAllBlobKeys();
+          const dbSongIds = new Set(dbSongs.map(s => s.id));
+          for (const blobId of blobKeys) {
+            if (blobId && !dbSongIds.has(blobId) && !isSongDeleted(blobId)) {
+              const recovered = await recoverSongEntryFromBlobId(blobId);
+              dbSongs.push(recovered);
+              dbSongIds.add(blobId);
+              try { await musicDB.saveSong(recovered); } catch (e) {}
+            }
+          }
+        }
       } catch (e) {}
 
       if (dbSongs.length > 0) {
         songs = [...dbSongs];
         songs.forEach(s => {
-          if (!s.dateAdded) s.dateAdded = Date.now();
+          if (!s.dateAdded && (Number(s.totalTimeListened) || 0) === 0 && (Number(s.playCount) || 0) === 0) s.dateAdded = Date.now();
           if (s.coverBlob && !(s.coverBlob instanceof Blob) && !(s.coverBlob instanceof File)) {
             s.coverBlob = null;
           }
-          const lst = getSongLedgerStats(s);
-          const bestSecs = Math.max(s.totalTimeListened || 0, lst.totalTimeListened || 0);
-          const bestPlays = Math.max(s.playCount || 0, lst.playCount || 0);
-          s.totalTimeListened = bestSecs;
-          s.playCount = bestPlays;
-          recordSongLedgerMonotonic(s, 0, 0);
         });
+        await sanitizeCorruptedSongStats(songs);
+        songs.forEach(s => { delete s._forceExactStats; });
         songs.sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0));
-        if (currentQueue.length === 0) currentQueue = [...songs];
+        rebindQueueToLiveSongs();
+        _libraryInitialHydrationDone = true;
+        if (typeof flushUnappliedNativeStats === "function") flushUnappliedNativeStats();
 
         if (currentTab === "library") {
           renderSongsTable(songs);
@@ -2711,12 +3701,6 @@ async function initSpotiLocalApp() {
         if (typeof window.SpotiLocalNativePlayer !== "undefined") {
           primeNativeLocalAudioMap(songs, window.SpotiLocalNativePlayer);
         }
-
-        setTimeout(() => {
-          if (typeof musicDB !== "undefined" && musicDB.migrateEmbeddedAudioBlobs) {
-            musicDB.migrateEmbeddedAudioBlobs().catch(() => {});
-          }
-        }, 1000);
       }
 
       // ONLY trigger automatic recovery if library is completely empty (corrupted DB or virgin boot)
@@ -2726,6 +3710,11 @@ async function initSpotiLocalApp() {
       } else {
         // Library has songs: heal metadata and restore album covers safely without resurrecting deleted tracks
         await reEnrichSongMetadata();
+        await sanitizeCorruptedSongStats(songs);
+        songs.forEach(s => { delete s._forceExactStats; });
+        if (typeof flushUnappliedNativeStats === "function") flushUnappliedNativeStats();
+        saveCachedSongs(songs);
+        scheduleDurableBackup();
       }
 
       // 2. Unconditional Sync from /api/songs (1.5s timeout)
@@ -2756,30 +3745,43 @@ async function initSpotiLocalApp() {
             };
           });
 
-           // Keep local metadata/stats as ground truth if IndexedDB was temporarily unavailable.
-           const localGroundTruthSongs = dbSongs.length > 0
-             ? dbSongs
-             : (localCachedSongs.length > 0 ? localCachedSongs : songs);
+          // Keep local metadata/stats as ground truth if IndexedDB was temporarily unavailable.
+          const localGroundTruthSongs = dbSongs.length > 0
+            ? dbSongs
+            : (localCachedSongs.length > 0 ? localCachedSongs : songs);
 
-           // Bulletproof merge: Start with local data as ground truth
-           const songMap = new Map();
-           localGroundTruthSongs.forEach(dbSong => {
+          const songMap = new Map();
+          localGroundTruthSongs.forEach(dbSong => {
             if (dbSong && dbSong.id) {
               songMap.set(dbSong.id, dbSong);
             }
           });
 
           apiSongs.forEach(apiSong => {
-            if (isSongDeleted(apiSong.id, apiSong.title)) return;
+            if (isSongDeleted(apiSong.id)) return;
             let existingKey = null;
             if (songMap.has(apiSong.id)) {
               existingKey = apiSong.id;
             } else {
+              const apiTitleNorm = normalizeStrictMeta(apiSong.title);
+              const apiArtistNorm = normalizeStrictMeta(apiSong.artist);
+              const apiCanMatchByMeta = Boolean(
+                apiTitleNorm && !isGenericSongTitle(apiSong.title) &&
+                apiArtistNorm && !isGenericArtistName(apiSong.artist)
+              );
               for (const [id, dbSong] of songMap.entries()) {
-                if (dbSong.title && apiSong.title && 
-                   (dbSong.title.toLowerCase() === apiSong.title.toLowerCase() ||
-                    dbSong.audioUrl === apiSong.audioUrl ||
-                    id.toLowerCase().includes(apiSong.title.toLowerCase()))) {
+                if (dbSong.audioUrl && apiSong.audioUrl && dbSong.audioUrl === apiSong.audioUrl) {
+                  existingKey = id;
+                  break;
+                }
+                if (
+                  apiCanMatchByMeta &&
+                  !dbSong.statsIsolated &&
+                  dbSong.title && !isGenericSongTitle(dbSong.title) &&
+                  dbSong.artist && !isGenericArtistName(dbSong.artist) &&
+                  normalizeStrictMeta(dbSong.title) === apiTitleNorm &&
+                  normalizeStrictMeta(dbSong.artist) === apiArtistNorm
+                ) {
                   existingKey = id;
                   break;
                 }
@@ -2790,8 +3792,8 @@ async function initSpotiLocalApp() {
               const existing = songMap.get(existingKey);
               const isOldWebm = existing.audioUrl && existing.audioUrl.endsWith(".webm");
               const ledgerStats = getSongLedgerStats(existing);
-              const safeTime = Math.max(existing.totalTimeListened || 0, apiSong.totalTimeListened || 0, ledgerStats.totalTimeListened || 0);
-              const safePlays = Math.max(existing.playCount || 0, apiSong.playCount || 0, ledgerStats.playCount || 0);
+              const safeTime = Math.max(existing.totalTimeListened || 0, ledgerStats.totalTimeListened || 0);
+              const safePlays = Math.max(existing.playCount || 0, ledgerStats.playCount || 0);
               const mergedRecord = {
                 ...apiSong,
                 ...existing,
@@ -2812,33 +3814,43 @@ async function initSpotiLocalApp() {
               recordSongLedgerMonotonic(mergedRecord, 0, 0);
               songMap.set(existingKey, mergedRecord);
             } else {
+              if (isGenericSongTitle(apiSong.title) || isGenericArtistName(apiSong.artist)) {
+                apiSong.statsIsolated = true;
+              }
               const ledgerStats = getSongLedgerStats(apiSong);
-              apiSong.totalTimeListened = Math.max(apiSong.totalTimeListened || 0, ledgerStats.totalTimeListened || 0);
-              apiSong.playCount = Math.max(apiSong.playCount || 0, ledgerStats.playCount || 0);
+              apiSong.totalTimeListened = ledgerStats.totalTimeListened || 0;
+              apiSong.playCount = ledgerStats.playCount || 0;
               recordSongLedgerMonotonic(apiSong, 0, 0);
               songMap.set(apiSong.id, apiSong);
             }
           });
 
-          const mergedSongs = Array.from(songMap.values()).filter(s => !isSongDeleted(s.id, s.title));
+          const mergedSongs = Array.from(songMap.values()).filter(s => !isSongDeleted(s.id));
           if (mergedSongs.length > 0) {
             songs = mergedSongs;
             songs.forEach(s => {
-              if (!s.dateAdded) s.dateAdded = Date.now();
+              if (!s.dateAdded && (Number(s.totalTimeListened) || 0) === 0 && (Number(s.playCount) || 0) === 0) s.dateAdded = Date.now();
             });
+            await sanitizeCorruptedSongStats(songs);
 
             songs.sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0));
-            currentQueue = [...songs];
+            rebindQueueToLiveSongs();
+            _libraryInitialHydrationDone = true;
+            if (typeof flushUnappliedNativeStats === "function") flushUnappliedNativeStats();
 
             for (const s of songs) {
-              try { await musicDB.saveSong(s); } catch(e){}
+              try {
+                await musicDB.saveSong(s, s._forceExactStats ? { forceExactStats: true } : {});
+                delete s._forceExactStats;
+              } catch (e) {}
             }
 
             // Silent Automatic Background Download & Caching for offline playback!
             downloadAndCacheAllSongs(songs);
 
-            // Save metadata cache to localStorage
+            // Save metadata cache to localStorage & Native Durable Backup
             saveCachedSongs(songs);
+            scheduleDurableBackup();
 
             renderSongsTable(songs);
             renderRecentGrid(songs.slice(0, 6));
@@ -2855,6 +3867,7 @@ async function initSpotiLocalApp() {
       console.error("Critical loadSongsFromDB error:", e);
     }
 
+    _libraryInitialHydrationDone = true;
     hydrateCoverArt(songs);
   }
 
@@ -2905,16 +3918,44 @@ async function initSpotiLocalApp() {
   }
 
   // --------------------------------------------------------------------------
-  // TIME-BASED STATISTICS & LOGGING ENGINE (V1.8.4 BULLETPROOF AUDITED)
+  // TIME-BASED STATISTICS & LOGGING ENGINE (V1.8.5 EXACT PER-SONG)
   // --------------------------------------------------------------------------
   let activePlaylistId = null;
   let _listeningLogsCache = null;
   let _statsIndexDirty = true;
   let _currentStatsYear = new Date().getFullYear();
-  let _persistedGlobalTotalSeconds = parseFloat(localStorage.getItem("spotilocal_global_total_secs") || "0") || 0;
-  let _persistedYearlyTotalSeconds = parseFloat(localStorage.getItem(`spotilocal_yearly_total_secs_${_currentStatsYear}`) || "0") || 0;
-  let _persistedHistoricalFloorSeconds = parseFloat(localStorage.getItem("spotilocal_historical_floor_secs") || "0") || 0;
   let _hasPriorYearLogs = false;
+
+  function purgeLegacyArtificialStats() {
+    try {
+      localStorage.removeItem("spotilocal_historical_floor_secs");
+      localStorage.removeItem("spotilocal_global_total_secs");
+      localStorage.removeItem("spotilocal_song_ledger");
+      const toRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("spotilocal_yearly_total_secs_")) {
+          toRemove.push(k);
+        }
+      }
+      for (let i = 0; i < toRemove.length; i++) {
+        localStorage.removeItem(toRemove[i]);
+      }
+
+      if (!localStorage.getItem("spotilocal_purged_idb_legacy_v185") &&
+          typeof musicDB !== "undefined" && musicDB.setSetting) {
+        const curYear = new Date().getFullYear();
+        Promise.all([
+          musicDB.setSetting("historicalFloorSeconds", 0).catch(() => {}),
+          musicDB.setSetting("globalTotalSeconds", 0).catch(() => {}),
+          musicDB.setSetting(`yearlyTotalSeconds_${curYear}`, 0).catch(() => {}),
+          musicDB.setSetting("song_stats_ledger", null).catch(() => {})
+        ]).then(() => {
+          try { localStorage.setItem("spotilocal_purged_idb_legacy_v185", "1"); } catch(e) {}
+        }).catch(() => {});
+      }
+    } catch(e) {}
+  }
 
   let _cachedStatsIndex = {
     todayTotal: 0,
@@ -2924,7 +3965,8 @@ async function initSpotiLocalApp() {
     tenDaysBySong: new Map(),
     weeklyBySong: new Map(),
     monthlyBySong: new Map(),
-    yearlyBySong: new Map()
+    yearlyBySong: new Map(),
+    allLogsBySong: new Map()
   };
   let _logsFlushTimeout = null;
 
@@ -2935,24 +3977,38 @@ async function initSpotiLocalApp() {
     const clean = [];
     for (let i = 0; i < logs.length; i++) {
       const l = logs[i];
-      if (!l || !l.songId || typeof l.seconds !== "number" || l.seconds <= 0) continue;
-      if (l.seconds > 14400) continue;
+      if (!l || !l.songId) continue;
+      const secs = typeof l.seconds === "number" && Number.isFinite(l.seconds) ? l.seconds : 0;
+      const scrobbles = typeof l.scrobbles === "number" && Number.isFinite(l.scrobbles) ? Math.max(0, Math.floor(l.scrobbles)) : undefined;
+      if ((secs <= 0 && !(secs === 0 && scrobbles && scrobbles > 0)) || secs > 14400) continue;
       if (l.timestamp && l.timestamp > maxFuture) continue;
-      clean.push(l);
+      const item = {
+        ...l,
+        seconds: Math.round(secs * 100) / 100,
+        startTs: (typeof l.startTs === "number" && l.startTs > 0) ? l.startTs : (l.timestamp || 0)
+      };
+      if (scrobbles !== undefined) item.scrobbles = scrobbles;
+      clean.push(item);
     }
     return clean;
   }
 
   function coalesceListeningLogs(logs) {
-    if (!Array.isArray(logs) || logs.length <= 1) return logs || [];
-    const sorted = sanitizeListeningLogs(logs).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    if (!Array.isArray(logs) || logs.length === 0) return [];
+    const cleaned = sanitizeListeningLogs(logs);
+    if (cleaned.length <= 1) return cleaned;
+
+    const sorted = cleaned.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     const merged = [];
+    const seenExact = new Set();
     const MAX_GAP_MS = 15 * 60 * 1000; // 15 minutos entre ticks continuos
     const MAX_BLOCK_SECS = 3600; // Máximo 1 hora acumulada por bloque coalescido
 
     for (let i = 0; i < sorted.length; i++) {
       const cur = sorted[i];
-      if (!cur || !cur.songId || typeof cur.seconds !== "number" || cur.seconds <= 0) continue;
+      const exactKey = `${cur.songId}|${cur.playlistId || ""}|${cur.timestamp || 0}|${Math.round(cur.seconds * 100)}|${cur.scrobbles ?? ""}`;
+      if (seenExact.has(exactKey)) continue;
+      seenExact.add(exactKey);
 
       if (merged.length === 0) {
         merged.push({ ...cur });
@@ -2963,7 +4019,9 @@ async function initSpotiLocalApp() {
       const sameSong = prev.songId === cur.songId;
       const samePlaylist = (prev.playlistId || null) === (cur.playlistId || null);
       const curTime = cur.timestamp || 0;
+      const curStart = cur.startTs || curTime;
       const prevTime = prev.timestamp || 0;
+      const prevStart = prev.startTs || prevTime;
       const timeDiff = curTime - prevTime;
 
       const dPrev = new Date(prevTime);
@@ -2972,14 +4030,95 @@ async function initSpotiLocalApp() {
                       dPrev.getMonth() === dCur.getMonth() &&
                       dPrev.getDate() === dCur.getDate();
 
+      // If cur overlaps prev's interval (e.g. partial snapshot), keep max span rather than double-summing
+      const overlapsPrev = sameSong && samePlaylist && sameDay && curStart <= prevTime && curTime >= prevStart && prevTime > 0 && curTime > 0;
+      if (overlapsPrev && (cur.seconds > 0 && prev.seconds > 0) && (cur.timestamp === prev.timestamp || curStart <= prevTime - 1000)) {
+        prev.seconds = Math.max(prev.seconds, cur.seconds);
+        prev.startTs = Math.min(prevStart, curStart);
+        prev.timestamp = Math.max(prevTime, curTime);
+        if (typeof prev.scrobbles === "number" || typeof cur.scrobbles === "number") {
+          prev.scrobbles = Math.max(Number(prev.scrobbles) || 0, Number(cur.scrobbles) || 0);
+        }
+        continue;
+      }
+
       if (sameSong && samePlaylist && sameDay && timeDiff >= 0 && timeDiff <= MAX_GAP_MS && (prev.seconds + cur.seconds) <= MAX_BLOCK_SECS) {
         prev.seconds = Math.round((prev.seconds + cur.seconds) * 100) / 100;
+        if (!prev.startTs) prev.startTs = prevTime;
         prev.timestamp = curTime;
+        if (typeof prev.scrobbles === "number" || typeof cur.scrobbles === "number") {
+          prev.scrobbles = (Number(prev.scrobbles) || 0) + (Number(cur.scrobbles) || 0);
+        }
       } else {
         merged.push({ ...cur });
       }
     }
     return merged;
+  }
+
+  // Snapshot-safe merger for combining DB, localStorage, backup, or imported logs WITHOUT doubling
+  function mergeListeningLogSources(...sources) {
+    const groups = new Map();
+    for (const src of sources) {
+      if (!Array.isArray(src)) continue;
+      const cleaned = sanitizeListeningLogs(src);
+      for (let i = 0; i < cleaned.length; i++) {
+        const entry = cleaned[i];
+        const key = `${entry.songId}|${entry.playlistId || ""}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(entry);
+      }
+    }
+
+    const mergedAll = [];
+    for (const list of groups.values()) {
+      list.sort((a, b) => (a.startTs || a.timestamp || 0) - (b.startTs || b.timestamp || 0) || (a.timestamp || 0) - (b.timestamp || 0));
+      const groupOut = [];
+      for (let i = 0; i < list.length; i++) {
+        const cur = { ...list[i] };
+        const curStart = cur.startTs || cur.timestamp || 0;
+        const curEnd = cur.timestamp || curStart;
+        if (groupOut.length === 0) {
+          groupOut.push(cur);
+          continue;
+        }
+        const prev = groupOut[groupOut.length - 1];
+        const prevStart = prev.startTs || prev.timestamp || 0;
+        const prevEnd = prev.timestamp || prevStart;
+
+        const sameDay = (() => {
+          const d1 = new Date(prevEnd);
+          const d2 = new Date(curEnd);
+          return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
+        })();
+
+        // Detect snapshot overlap/equality (identical timestamp or overlapping [startTs..timestamp] interval)
+        const isDuplicateOrOverlap = (
+          (curEnd === prevEnd && cur.seconds === prev.seconds) ||
+          (curStart <= prevEnd && curEnd >= prevStart && (curEnd - prevEnd === 0 || (curStart < prevEnd && cur.seconds > 0 && prev.seconds > 0)))
+        );
+
+        if (isDuplicateOrOverlap) {
+          prev.seconds = Math.max(prev.seconds, cur.seconds);
+          prev.startTs = Math.min(prevStart, curStart);
+          prev.timestamp = Math.max(prevEnd, curEnd);
+          if (typeof prev.scrobbles === "number" || typeof cur.scrobbles === "number") {
+            prev.scrobbles = Math.max(Number(prev.scrobbles) || 0, Number(cur.scrobbles) || 0);
+          }
+        } else if (sameDay && (curStart - prevEnd) >= 0 && (curStart - prevEnd) <= 15 * 60 * 1000 && (prev.seconds + cur.seconds) <= 3600) {
+          prev.seconds = Math.round((prev.seconds + cur.seconds) * 100) / 100;
+          prev.timestamp = curEnd;
+          if (typeof prev.scrobbles === "number" || typeof cur.scrobbles === "number") {
+            prev.scrobbles = (Number(prev.scrobbles) || 0) + (Number(cur.scrobbles) || 0);
+          }
+        } else {
+          groupOut.push(cur);
+        }
+      }
+      for (const item of groupOut) mergedAll.push(item);
+    }
+
+    return mergedAll.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
   }
 
   function getListeningLogs() {
@@ -3012,17 +4151,42 @@ async function initSpotiLocalApp() {
     _statsIndexDirty = true;
   }
 
-  function resolveLogSongId(sid) {
+  function resolveLogSongId(sid, logTitle = null, logArtist = null) {
     if (!sid) return null;
     if (songs && songs.some(s => s.id === sid)) return sid;
-    const cleanSid = String(sid).toLowerCase().replace(/^folder_/, "").replace(/\.[a-z0-9]+$/i, "").trim();
-    if (songs) {
-      const match = songs.find(s => {
-        const cleanTitle = (s.title || "").toLowerCase().trim();
-        return cleanTitle && (cleanSid.includes(cleanTitle) || cleanTitle.includes(cleanSid));
+
+    const sidStr = String(sid).trim();
+    const sidNoPrefix = sidStr.replace(/^folder_/i, "").trim();
+    if (songs && sidNoPrefix) {
+      const byStrippedId = songs.find(s => {
+        if (!s || !s.id) return false;
+        const candidateId = String(s.id).trim();
+        return candidateId === sidNoPrefix || candidateId.replace(/^folder_/i, "").trim() === sidNoPrefix;
       });
-      if (match) return match.id;
+      if (byStrippedId) return byStrippedId.id;
     }
+
+    if (
+      songs &&
+      logTitle && logArtist &&
+      typeof normalizeStrictMeta === "function" &&
+      typeof isGenericSongTitle === "function" &&
+      typeof isGenericArtistName === "function" &&
+      !isGenericSongTitle(logTitle) &&
+      !isGenericArtistName(logArtist)
+    ) {
+      const normLogTitle = normalizeStrictMeta(logTitle);
+      const normLogArtist = normalizeStrictMeta(logArtist);
+      if (normLogTitle && normLogArtist) {
+        const exactMetaMatches = songs.filter(s => {
+          if (!s || s.statsIsolated || !s.title || !s.artist) return false;
+          if (isGenericSongTitle(s.title) || isGenericArtistName(s.artist)) return false;
+          return normalizeStrictMeta(s.title) === normLogTitle && normalizeStrictMeta(s.artist) === normLogArtist;
+        });
+        if (exactMetaMatches.length === 1) return exactMetaMatches[0].id;
+      }
+    }
+
     return sid;
   }
 
@@ -3030,7 +4194,6 @@ async function initSpotiLocalApp() {
     if (!_statsIndexDirty) return _cachedStatsIndex;
     const logs = getListeningLogs();
     const now = new Date();
-    const currentYear = now.getFullYear();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
@@ -3047,13 +4210,14 @@ async function initSpotiLocalApp() {
     const weeklyMap = new Map();
     const monthlyMap = new Map();
     const yearlyMap = new Map();
+    const allLogsMap = new Map();
 
     for (let i = 0; i < logs.length; i++) {
       const l = logs[i];
       if (!l) continue;
       const t = l.timestamp || 0;
       const s = l.seconds || 0;
-      const sid = resolveLogSongId(l.songId);
+      const sid = resolveLogSongId(l.songId, l.title, l.artist);
 
       historySum += s;
       if (t >= startOfToday && t <= endOfToday) todaySum += s;
@@ -3061,6 +4225,7 @@ async function initSpotiLocalApp() {
       if (t >= startOfYear) yearSum += s;
 
       if (sid != null) {
+        allLogsMap.set(sid, (allLogsMap.get(sid) || 0) + s);
         if (t >= tenDaysAgo) tenDaysMap.set(sid, (tenDaysMap.get(sid) || 0) + s);
         if (t >= monday) weeklyMap.set(sid, (weeklyMap.get(sid) || 0) + s);
         if (t >= startOfMonth) monthlyMap.set(sid, (monthlyMap.get(sid) || 0) + s);
@@ -3072,7 +4237,6 @@ async function initSpotiLocalApp() {
       const lst = (typeof getSongLedgerStats === "function") ? getSongLedgerStats(s) : null;
       return sum + Math.max(s.totalTimeListened || 0, (lst ? lst.totalTimeListened : 0));
     }, 0);
-    const playlistSum = (playlists || []).reduce((sum, p) => sum + (p.totalTimeListened || 0), 0);
 
     let yearFromSongs = 0;
     if (Array.isArray(songs)) {
@@ -3082,48 +4246,18 @@ async function initSpotiLocalApp() {
         const lst = (typeof getSongLedgerStats === "function") ? getSongLedgerStats(s) : null;
         const songTrueTime = Math.max(s.totalTimeListened || 0, (lst ? lst.totalTimeListened : 0));
         const songYearlyLogs = yearlyMap.get(s.id) || 0;
-        if (!s.dateAdded || s.dateAdded >= startOfYear) {
-          yearFromSongs += Math.max(songYearlyLogs, songTrueTime);
+        const songAnyLogs = allLogsMap.get(s.id) || 0;
+        if (songAnyLogs <= 0 && (!s.dateAdded || s.dateAdded >= startOfYear)) {
+          yearFromSongs += songTrueTime;
         } else {
-          yearFromSongs += songYearlyLogs;
+          yearFromSongs += Math.min(songYearlyLogs, songTrueTime > 0 ? songTrueTime : songYearlyLogs);
         }
       }
     }
 
     const archivedSecs = parseFloat(localStorage.getItem("spotilocal_archived_secs") || "0") || 0;
-    const effectiveYearTotal = Math.max(
-      yearSum,
-      yearFromSongs,
-      _persistedYearlyTotalSeconds,
-      (!_hasPriorYearLogs ? _persistedGlobalTotalSeconds : 0)
-    );
-    const effectiveHistoryTotal = Math.max(
-      sumSongTime,
-      historySum + archivedSecs,
-      playlistSum,
-      effectiveYearTotal,
-      _persistedGlobalTotalSeconds,
-      _persistedHistoricalFloorSeconds
-    );
-
-    if (effectiveHistoryTotal > _persistedGlobalTotalSeconds) {
-      _persistedGlobalTotalSeconds = effectiveHistoryTotal;
-      try {
-        localStorage.setItem("spotilocal_global_total_secs", String(_persistedGlobalTotalSeconds));
-        if (typeof musicDB !== "undefined" && musicDB.setSetting) {
-          musicDB.setSetting("globalTotalSeconds", _persistedGlobalTotalSeconds).catch(() => {});
-        }
-      } catch(e) {}
-    }
-    if (effectiveYearTotal > _persistedYearlyTotalSeconds) {
-      _persistedYearlyTotalSeconds = effectiveYearTotal;
-      try {
-        localStorage.setItem(`spotilocal_yearly_total_secs_${currentYear}`, String(_persistedYearlyTotalSeconds));
-        if (typeof musicDB !== "undefined" && musicDB.setSetting) {
-          musicDB.setSetting(`yearlyTotalSeconds_${currentYear}`, _persistedYearlyTotalSeconds).catch(() => {});
-        }
-      } catch(e) {}
-    }
+    const effectiveYearTotal = Math.max(yearSum, yearFromSongs);
+    const effectiveHistoryTotal = Math.max(sumSongTime, historySum + archivedSecs, effectiveYearTotal);
 
     _cachedStatsIndex = {
       todayTotal: todaySum,
@@ -3133,82 +4267,69 @@ async function initSpotiLocalApp() {
       tenDaysBySong: tenDaysMap,
       weeklyBySong: weeklyMap,
       monthlyBySong: monthlyMap,
-      yearlyBySong: yearlyMap
+      yearlyBySong: yearlyMap,
+      allLogsBySong: allLogsMap
     };
     _statsIndexDirty = false;
     return _cachedStatsIndex;
   }
 
+  let _restoreLogsInFlight = null;
+
   async function restoreListeningLogsFromDB() {
-    if (typeof musicDB === "undefined" || !musicDB.getSetting) return;
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const startOfYear = new Date(currentYear, 0, 1).getTime();
-
-    const [dbLogs, dbGlobalTotal, dbYearTotal, dbFloor, dbArchived] = await Promise.all([
-      musicDB.getSetting("listeningLogs", []).catch(() => []),
-      musicDB.getSetting("globalTotalSeconds", 0).catch(() => 0),
-      musicDB.getSetting(`yearlyTotalSeconds_${currentYear}`, 0).catch(() => 0),
-      musicDB.getSetting("historicalFloorSeconds", 0).catch(() => 0),
-      musicDB.getSetting("archivedHistorySeconds", 0).catch(() => 0)
-    ]);
-
-    const localLogs = getListeningLogs();
-    const candidates = [
-      ...(Array.isArray(dbLogs) ? dbLogs : []),
-      ...localLogs
-    ];
-
-    const coalesced = coalesceListeningLogs(candidates);
-    const capped = coalesced.slice(-25000);
-    _listeningLogsCache = capped;
-
-    _hasPriorYearLogs = capped.some(l => l && l.timestamp && l.timestamp < startOfYear);
-
-    const localGlobalTotal = parseFloat(localStorage.getItem("spotilocal_global_total_secs") || "0") || 0;
-    const localYearTotal = parseFloat(localStorage.getItem(`spotilocal_yearly_total_secs_${currentYear}`) || "0") || 0;
-    const localFloor = parseFloat(localStorage.getItem("spotilocal_historical_floor_secs") || "0") || 0;
-    const localArchived = parseFloat(localStorage.getItem("spotilocal_archived_secs") || "0") || 0;
-
-    _persistedHistoricalFloorSeconds = Math.max(Number(dbFloor) || 0, localFloor);
-    _persistedGlobalTotalSeconds = Math.max(Number(dbGlobalTotal) || 0, localGlobalTotal, _persistedHistoricalFloorSeconds);
-    _persistedYearlyTotalSeconds = Math.max(Number(dbYearTotal) || 0, localYearTotal);
-
-    if (!_hasPriorYearLogs && _persistedYearlyTotalSeconds < _persistedGlobalTotalSeconds) {
-      _persistedYearlyTotalSeconds = _persistedGlobalTotalSeconds;
-    }
-
-    const effectiveArchived = Math.max(Number(dbArchived) || 0, localArchived);
-    if (effectiveArchived > 0) {
+    if (_restoreLogsInFlight) return _restoreLogsInFlight;
+    _restoreLogsInFlight = (async () => {
       try {
-        localStorage.setItem("spotilocal_archived_secs", String(effectiveArchived));
-      } catch(e) {}
-    }
+        purgeLegacyArtificialStats();
+        if (typeof musicDB === "undefined" || !musicDB.getSetting) return;
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const startOfYear = new Date(currentYear, 0, 1).getTime();
 
-    try {
-      localStorage.setItem("spotilocal_global_total_secs", String(_persistedGlobalTotalSeconds));
-      localStorage.setItem(`spotilocal_yearly_total_secs_${currentYear}`, String(_persistedYearlyTotalSeconds));
-      localStorage.setItem("spotilocal_historical_floor_secs", String(_persistedHistoricalFloorSeconds));
-      localStorage.setItem("spotilocal_listening_logs", JSON.stringify(capped));
+        const [dbLogs, dbArchived] = await Promise.all([
+          musicDB.getSetting("listeningLogs", []).catch(() => []),
+          musicDB.getSetting("archivedHistorySeconds", 0).catch(() => 0)
+        ]);
 
-      await Promise.all([
-        musicDB.setSetting("listeningLogs", capped).catch(() => {}),
-        musicDB.setSetting("globalTotalSeconds", _persistedGlobalTotalSeconds).catch(() => {}),
-        musicDB.setSetting(`yearlyTotalSeconds_${currentYear}`, _persistedYearlyTotalSeconds).catch(() => {}),
-        musicDB.setSetting("historicalFloorSeconds", _persistedHistoricalFloorSeconds).catch(() => {})
-      ]);
-    } catch(e) {}
+        const localLogs = getListeningLogs();
+        const merged = mergeListeningLogSources(
+          Array.isArray(dbLogs) ? dbLogs : [],
+          localLogs
+        );
+        const capped = merged.slice(-25000);
+        _listeningLogsCache = capped;
 
-    invalidateStatsIndex();
-    renderHomeStats();
-    if (typeof updateStatsAuditCard === "function") updateStatsAuditCard();
+        _hasPriorYearLogs = capped.some(l => l && l.timestamp && l.timestamp < startOfYear);
+
+        const localArchived = parseFloat(localStorage.getItem("spotilocal_archived_secs") || "0") || 0;
+        const effectiveArchived = Math.max(Number(dbArchived) || 0, localArchived);
+        if (effectiveArchived > 0) {
+          try {
+            localStorage.setItem("spotilocal_archived_secs", String(effectiveArchived));
+          } catch(e) {}
+        }
+
+        try {
+          localStorage.setItem("spotilocal_listening_logs", JSON.stringify(capped));
+          await musicDB.setSetting("listeningLogs", capped).catch(() => {});
+        } catch(e) {}
+
+        invalidateStatsIndex();
+        renderHomeStats();
+        if (typeof updateStatsAuditCard === "function") updateStatsAuditCard();
+      } finally {
+        _restoreLogsInFlight = null;
+      }
+    })();
+    return _restoreLogsInFlight;
   }
 
-  function recordListeningLog(songId, seconds, playlistId = null, timestamp = null) {
+  function recordListeningLog(songId, seconds, playlistId = null, timestamp = null, scrobbles = 0) {
     try {
       const logs = getListeningLogs();
-      const recSecs = Math.round(seconds * 100) / 100;
-      if (recSecs <= 0 || recSecs > 14400) return;
+      const recSecs = Math.round((Number(seconds) || 0) * 100) / 100;
+      const recScrobbles = Math.max(0, Math.floor(Number(scrobbles) || 0));
+      if ((recSecs <= 0 && recScrobbles <= 0) || recSecs > 14400) return;
       const curTime = timestamp || Date.now();
       const MAX_GAP_MS = 15 * 60 * 1000;
       const MAX_BLOCK_SECS = 3600;
@@ -3229,15 +4350,19 @@ async function initSpotiLocalApp() {
         if (sameSong && samePlaylist && sameDay && timeDiff >= 0 && timeDiff <= MAX_GAP_MS && (last.seconds + recSecs) <= MAX_BLOCK_SECS) {
           last.seconds = Math.round((last.seconds + recSecs) * 100) / 100;
           last.timestamp = curTime;
+          if (!last.startTs) last.startTs = curTime;
+          last.scrobbles = (Number(last.scrobbles) || 0) + recScrobbles;
           mergedIntoLast = true;
         }
       }
 
       if (!mergedIntoLast) {
         logs.push({
+          startTs: curTime,
           timestamp: curTime,
           songId: songId,
           seconds: recSecs,
+          scrobbles: recScrobbles,
           playlistId: playlistId || null
         });
       }
@@ -3283,12 +4408,16 @@ async function initSpotiLocalApp() {
   function getSongSecondsLast10Days(songId) {
     const song = songs.find(s => s.id === songId);
     if (!song) return 0;
-    const idx = getStatsIndex();
-    if (idx.tenDaysBySong.has(songId)) return idx.tenDaysBySong.get(songId);
-    const tenDaysAgo = Date.now() - (10 * 86400 * 1000);
     const ledgerStats = (typeof getSongLedgerStats === "function") ? getSongLedgerStats(song) : null;
     const safeSongTime = Math.max(song.totalTimeListened || 0, (ledgerStats ? ledgerStats.totalTimeListened : 0));
-    if (song.dateAdded && song.dateAdded >= tenDaysAgo) return safeSongTime;
+    const idx = getStatsIndex();
+    if (idx.tenDaysBySong.has(songId)) {
+      const logged = idx.tenDaysBySong.get(songId) || 0;
+      return safeSongTime > 0 ? Math.min(logged, safeSongTime) : logged;
+    }
+    const anyLogs = idx.allLogsBySong ? (idx.allLogsBySong.get(songId) || 0) : 0;
+    const tenDaysAgo = Date.now() - (10 * 86400 * 1000);
+    if (anyLogs <= 0 && song.dateAdded && song.dateAdded >= tenDaysAgo) return safeSongTime;
     return 0;
   }
 
@@ -3324,13 +4453,11 @@ async function initSpotiLocalApp() {
     else if (filter === "yearly") { map = idx.yearlyBySong; cutoff = getStartOfYear(); }
 
     if (map && map.has(songId)) {
-      const logged = map.get(songId);
-      if (cutoff && (!song.dateAdded || song.dateAdded >= cutoff)) {
-        return Math.max(logged, safeSongTime);
-      }
-      return logged;
+      const logged = map.get(songId) || 0;
+      return safeSongTime > 0 ? Math.min(logged, safeSongTime) : logged;
     }
-    if (cutoff && (!song.dateAdded || song.dateAdded >= cutoff)) return safeSongTime;
+    const anyLogs = idx.allLogsBySong ? (idx.allLogsBySong.get(songId) || 0) : 0;
+    if (anyLogs <= 0 && cutoff && song.dateAdded && song.dateAdded >= cutoff) return safeSongTime;
     return 0;
   }
 
@@ -3849,11 +4976,15 @@ async function initSpotiLocalApp() {
     const s = songs.find(x => x.id === id);
     if (s) {
       s.isLiked = !s.isLiked;
+      const qSong = currentQueue.find(x => x && x.id === id);
+      if (qSong && qSong !== s) qSong.isLiked = s.isLiked;
       renderSongsTable(songs);
       renderFavoritesGrid(songs.filter(x => x.isLiked));
       if (currentSongIndex !== -1 && currentQueue[currentSongIndex]?.id === id) {
         updateLikeBtnUI(s.isLiked);
       }
+      saveCachedSongs(songs);
+      scheduleDurableBackup();
       try {
         await musicDB.toggleLike(id);
       } catch(e) {}
@@ -3863,26 +4994,33 @@ async function initSpotiLocalApp() {
   async function deleteSong(id) {
     const song = songs.find(s => s.id === id);
     const songTitle = song ? song.title : "";
-    const confirmMsg = songTitle 
+    const confirmMsg = songTitle
       ? `¿Estás seguro de eliminar "${songTitle}" de tu biblioteca local?`
       : "¿Estás seguro de eliminar esta canción de tu biblioteca local?";
 
     if (!confirm(confirmMsg)) return;
 
-    markSongAsDeleted(id, songTitle);
+    const deletedQueueIdx = currentQueue.findIndex(s => s && s.id === id);
+    const wasPlayingDeleted = (currentSongIndex !== -1 && deletedQueueIdx === currentSongIndex);
+    const nativeAudioKey = song ? getNativeAudioKey(song) : "";
+    const nativeFileName = song && song.nativeFileName ? song.nativeFileName : "";
 
-    // Lock historical and yearly totals before removing song so total hours never decrease
-    const currentStats = getStatsIndex();
-    _persistedGlobalTotalSeconds = Math.max(_persistedGlobalTotalSeconds, currentStats.historyTotal || 0);
-    _persistedYearlyTotalSeconds = Math.max(_persistedYearlyTotalSeconds, currentStats.yearTotal || 0);
-    try {
-      localStorage.setItem("spotilocal_global_total_secs", String(_persistedGlobalTotalSeconds));
-      localStorage.setItem(`spotilocal_yearly_total_secs_${new Date().getFullYear()}`, String(_persistedYearlyTotalSeconds));
-      if (typeof musicDB !== "undefined" && musicDB.setSetting) {
-        musicDB.setSetting("globalTotalSeconds", _persistedGlobalTotalSeconds).catch(() => {});
-        musicDB.setSetting(`yearlyTotalSeconds_${new Date().getFullYear()}`, _persistedYearlyTotalSeconds).catch(() => {});
+    markSongAsDeleted(id);
+    if (nativeFileName) markSongAsDeleted(nativeFileName);
+
+    _nativeAudioHashCache.delete(id);
+    if (nativeAudioKey) _nativeAudioHashCache.delete(nativeAudioKey);
+    coverObjectUrlCache.delete(id);
+    if (Array.isArray(_unappliedNativeStats) && _unappliedNativeStats.length > 0) {
+      let filtered = false;
+      for (let i = _unappliedNativeStats.length - 1; i >= 0; i--) {
+        if (_unappliedNativeStats[i] && _unappliedNativeStats[i].songId === id) {
+          _unappliedNativeStats.splice(i, 1);
+          filtered = true;
+        }
       }
-    } catch(e) {}
+      if (filtered && typeof _persistUnappliedNativeStats === "function") _persistUnappliedNativeStats();
+    }
 
     try {
       if (typeof musicDB !== "undefined" && musicDB.deleteSong) {
@@ -3892,11 +5030,74 @@ async function initSpotiLocalApp() {
       console.warn("Error deleting from DB:", e);
     }
 
+    if (Array.isArray(playlists) && playlists.length > 0) {
+      for (const pl of playlists) {
+        if (pl && Array.isArray(pl.songIds) && pl.songIds.includes(id)) {
+          pl.songIds = pl.songIds.filter(sid => sid !== id);
+          if (typeof musicDB !== "undefined" && musicDB.savePlaylist) {
+            musicDB.savePlaylist(pl).catch(() => {});
+          }
+        }
+      }
+    }
+
+    try {
+      const np = (typeof window !== "undefined" && window.SpotiLocalNativePlayer) ? window.SpotiLocalNativePlayer : null;
+      if (np && typeof np.deleteLocalAudio === "function") {
+        np.deleteLocalAudio(id);
+        if (nativeAudioKey && nativeAudioKey !== id) np.deleteLocalAudio(nativeAudioKey);
+        if (nativeFileName) np.deleteLocalAudio(nativeFileName);
+      }
+    } catch (e) {}
+
     songs = songs.filter(s => s.id !== id);
     currentQueue = currentQueue.filter(s => s.id !== id);
+    unshuffledQueue = unshuffledQueue.filter(s => s.id !== id);
+    pendingQueue = pendingQueue.filter(s => s.id !== id);
+
+    if (wasPlayingDeleted) {
+      currentSongListenedSeconds = 0;
+      lastTimeUpdate = 0;
+      lastProgressWallTime = 0;
+      hasScrobbledCurrentPlay = false;
+      if (currentQueue.length > 0) {
+        currentSongIndex = Math.min(deletedQueueIdx, currentQueue.length - 1);
+        if (isPlaying) {
+          loadAndPlayCurrentSong().catch(() => {});
+        } else {
+          syncNativeQueue();
+          updatePlayerMetadata(currentQueue[currentSongIndex]);
+        }
+      } else {
+        currentSongIndex = -1;
+        isPlaying = false;
+        const np = (typeof window !== "undefined" && window.SpotiLocalNativePlayer) ? window.SpotiLocalNativePlayer : null;
+        if (np) {
+          if (typeof np.stop === "function") { try { np.stop(); } catch (e) {} }
+          else if (usingNativePlayback && typeof np.pause === "function") { try { np.pause(); } catch (e) {} }
+        }
+        if (audioElement && audioElement.pause) {
+          try {
+            audioElement.pause();
+            audioElement.removeAttribute("src");
+          } catch (e) {}
+        }
+        if (playerTitle) playerTitle.textContent = "Sin reproducción";
+        if (playerArtist) playerArtist.textContent = "SpotiLocal";
+        if (expandedTitle) expandedTitle.textContent = "Sin reproducción";
+        if (expandedArtist) expandedArtist.textContent = "SpotiLocal";
+        updatePlayPauseUI();
+      }
+    } else if (deletedQueueIdx !== -1 && deletedQueueIdx < currentSongIndex) {
+      currentSongIndex = Math.max(0, currentSongIndex - 1);
+      syncNativeQueue();
+    } else if (deletedQueueIdx !== -1) {
+      syncNativeQueue();
+    }
 
     saveCachedSongs(songs);
     invalidateStatsIndex();
+    flushDurableBackupNow(true).catch(() => {});
 
     _libraryTableDirty = true;
     renderSongsTable(songs);
@@ -3905,48 +5106,10 @@ async function initSpotiLocalApp() {
     renderWrappedStats();
     try { renderHistoricalRanking(true); } catch(e) {}
 
-    if (currentSong && currentSong.id === id) {
-      if (currentQueue.length > 0) {
-        playNext();
-      } else {
-        if (audioPlayer && audioPlayer.pause) audioPlayer.pause();
-        currentSong = null;
-        updatePlayerUI(null);
-      }
-    }
-
     if (typeof showToast === "function") {
       showToast("Canción eliminada definitivamente 🗑️");
     }
   }
-
-  // Filter chips in Library
-  document.querySelectorAll(".library-filters .filter-chip").forEach(btn => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".library-filters .filter-chip").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-
-      const filter = btn.getAttribute("data-filter");
-      if (filter === "all") {
-        songsListContainer.classList.remove("hidden");
-        libraryPlaylistsGrid.classList.add("hidden");
-        renderSongsTable(songs);
-      } else if (filter === "top") {
-        songsListContainer.classList.remove("hidden");
-        libraryPlaylistsGrid.classList.add("hidden");
-        const topSorted = [...songs].sort((a, b) => (b.totalTimeListened || 0) - (a.totalTimeListened || 0));
-        renderSongsTable(topSorted);
-      } else if (filter === "liked") {
-        songsListContainer.classList.remove("hidden");
-        libraryPlaylistsGrid.classList.add("hidden");
-        renderSongsTable(songs.filter(s => s.isLiked));
-      } else if (filter === "playlists") {
-        songsListContainer.classList.add("hidden");
-        libraryPlaylistsGrid.classList.remove("hidden");
-        renderPlaylistsGrid();
-      }
-    });
-  });
 
   // Global Search
   globalSearchInput.addEventListener("input", (e) => {
@@ -4032,6 +5195,10 @@ async function initSpotiLocalApp() {
   }
 
   async function playSongById(id, contextSongs = null) {
+    if (currentSongIndex !== -1) {
+      if (usingNativePlayback) applyNativeListeningStats();
+      else recordCurrentSongTime(true);
+    }
     pendingQueue = [];
     const sourceList = (Array.isArray(contextSongs) && contextSongs.length > 0)
       ? contextSongs
@@ -4148,6 +5315,9 @@ async function initSpotiLocalApp() {
     const song = currentQueue[currentSongIndex];
     if (!song) return;
 
+    currentSongListenedSeconds = 0;
+    lastTimeUpdate = 0;
+    lastProgressWallTime = 0;
     hasScrobbledCurrentPlay = false;
 
     if (currentAudioObjectUrl) {
@@ -4549,7 +5719,7 @@ async function initSpotiLocalApp() {
   function playNextSong() {
     if (currentQueue.length === 0) return;
     if (usingNativePlayback) applyNativeListeningStats();
-    else recordCurrentSongTime();
+    else recordCurrentSongTime(true);
     if (pendingQueue.length > 0 && repeatMode !== 2) {
       const nextQueuedSong = pendingQueue.shift();
       const insertIndex = currentSongIndex >= 0 ? currentSongIndex + 1 : currentQueue.length;
@@ -4596,7 +5766,7 @@ async function initSpotiLocalApp() {
   function playPrevSong() {
     if (currentQueue.length === 0) return;
     if (usingNativePlayback) applyNativeListeningStats();
-    else recordCurrentSongTime();
+    else recordCurrentSongTime(true);
     const useNative = usingNativePlayback && typeof window.SpotiLocalNativePlayer !== "undefined" && window.SpotiLocalNativePlayer.isAvailable && window.SpotiLocalNativePlayer.isAvailable();
     // If more than 3s played, restart current song
     let currentPos = 0;
@@ -4613,6 +5783,9 @@ async function initSpotiLocalApp() {
         window.SpotiLocalNativePlayer.seekTo(0);
       } else {
         audioElement.currentTime = 0;
+        hasScrobbledCurrentPlay = false;
+        lastTimeUpdate = 0;
+        lastProgressWallTime = Date.now();
       }
       return;
     }
@@ -4720,7 +5893,8 @@ async function initSpotiLocalApp() {
   function toggleRepeat() {
     repeatMode = (repeatMode === 1) ? 2 : 1;
     localStorage.setItem("spotilocal_repeat_mode", String(repeatMode));
-    audioElement.loop = (repeatMode === 2);
+    // Keep HTML5 <audio>.loop = false so the 'ended' event always fires and resets scrobble/stats per play
+    audioElement.loop = false;
     if (typeof window.SpotiLocalNativePlayer !== "undefined" && window.SpotiLocalNativePlayer.setRepeatMode) {
       window.SpotiLocalNativePlayer.setRepeatMode(repeatMode);
     }
@@ -4823,12 +5997,22 @@ async function initSpotiLocalApp() {
     // Scrobble Rule: Count 1 reproduction ONLY after reaching 50% of the song duration
     if (currentSongIndex !== -1 && !hasScrobbledCurrentPlay && !usingNativePlayback) {
       const song = currentQueue[currentSongIndex];
-      if (song && (dur > 0 && cur >= dur * 0.5)) {
+      const effectiveDur = displayDur > 0 ? displayDur : dur;
+      const effectiveCur = displayDur > 0 ? displayCur : cur;
+      if (song && (effectiveDur > 0 && effectiveCur >= effectiveDur * 0.5)) {
         hasScrobbledCurrentPlay = true;
-        const ledgerStats = recordSongLedgerMonotonic(song, 0, 1);
-        song.playCount = ledgerStats.playCount;
-        try { musicDB.saveSong(song); } catch(e){}
+        const masterSong = songs.find(s => s && s.id === song.id) || song;
+        const ledgerStats = recordSongLedgerMonotonic(masterSong, 0, 1);
+        masterSong.playCount = ledgerStats.playCount;
+        if (song !== masterSong) song.playCount = masterSong.playCount;
+        if (typeof recordListeningLog === "function") {
+          recordListeningLog(masterSong.id, 0, activePlaylistId, Date.now(), 1);
+        }
+        try {
+          musicDB.syncListeningStats(masterSong.id, 0, masterSong.totalTimeListened, masterSong.playCount);
+        } catch(e){}
         saveCachedSongs(songs);
+        scheduleDurableBackup();
         renderWrappedStats();
         try { renderHistoricalRanking(); } catch(e){}
       }
@@ -4847,8 +6031,13 @@ async function initSpotiLocalApp() {
       const trimStart = isTrimActive && typeof currentSong.trimStart === "number" ? currentSong.trimStart : 0;
       const trimEnd = isTrimActive && (typeof currentSong.trimEnd === "number" && currentSong.trimEnd > 0) ? currentSong.trimEnd : dur;
       if (isTrimActive && trimEnd > 0 && cur >= trimEnd) {
+        updatePlaybackProgress(cur, dur);
+        recordCurrentSongTime(true);
         if (repeatMode === 2) {
           audioElement.currentTime = trimStart;
+          hasScrobbledCurrentPlay = false;
+          lastTimeUpdate = trimStart;
+          lastProgressWallTime = Date.now();
         } else {
           playNextSong();
         }
@@ -4875,26 +6064,54 @@ async function initSpotiLocalApp() {
     lastProgressWallTime = Date.now();
   });
   audioElement.addEventListener("seeked", () => {
-    lastTimeUpdate = audioElement.currentTime || 0;
+    const cur = audioElement.currentTime || 0;
+    const dur = audioElement.duration || 0;
+    lastTimeUpdate = cur;
     lastProgressWallTime = Date.now();
+    const currentSong = currentQueue[currentSongIndex];
+    if (hasScrobbledCurrentPlay && dur > 0 && currentSong) {
+      const isTrimActive = currentSong.trimEnabled !== false;
+      const tStart = isTrimActive && typeof currentSong.trimStart === "number" ? currentSong.trimStart : 0;
+      const tEnd = isTrimActive && typeof currentSong.trimEnd === "number" && currentSong.trimEnd > 0 ? currentSong.trimEnd : dur;
+      const effDur = (tEnd > tStart) ? (tEnd - tStart) : dur;
+      const effCur = Math.max(0, cur - tStart);
+      if (effDur > 0 && effCur < Math.min(2, Math.max(0.25, effDur * 0.2))) {
+        hasScrobbledCurrentPlay = false;
+      }
+    }
   });
 
   audioElement.addEventListener("ended", () => {
+    if (usingNativePlayback) return;
+
     if (currentSongIndex !== -1 && !hasScrobbledCurrentPlay) {
       const song = currentQueue[currentSongIndex];
       if (song) {
         hasScrobbledCurrentPlay = true;
-        const ledgerStats = recordSongLedgerMonotonic(song, 0, 1);
-        song.playCount = ledgerStats.playCount;
-        try { musicDB.saveSong(song); } catch(e){}
+        const masterSong = songs.find(s => s && s.id === song.id) || song;
+        const ledgerStats = recordSongLedgerMonotonic(masterSong, 0, 1);
+        masterSong.playCount = ledgerStats.playCount;
+        if (song !== masterSong) song.playCount = masterSong.playCount;
+        if (typeof recordListeningLog === "function") {
+          recordListeningLog(masterSong.id, 0, activePlaylistId, Date.now(), 1);
+        }
+        try {
+          musicDB.syncListeningStats(masterSong.id, 0, masterSong.totalTimeListened, masterSong.playCount);
+        } catch(e){}
         saveCachedSongs(songs);
         try { renderWrappedStats(); } catch(e) {}
         try { renderHistoricalRanking(); } catch(e){}
       }
     }
 
+    recordCurrentSongTime(true);
+    scheduleDurableBackup();
+
     if (repeatMode === 2) {
       audioElement.currentTime = 0;
+      hasScrobbledCurrentPlay = false;
+      lastTimeUpdate = 0;
+      lastProgressWallTime = Date.now();
       const replayPromise = audioElement.play();
       if (replayPromise && typeof replayPromise.catch === "function") {
         replayPromise.catch(() => {});
@@ -4911,71 +6128,206 @@ async function initSpotiLocalApp() {
   let _nativeLastEnded = false;
   let _nativeLastMediaId = "";
   let _nativeOfflineFallbackAttempted = false;
+  let _nativeLastIsPlaying = false;
+  let _lastNativeStatsDrainAt = 0;
+  let _drainingNativeStatsBridge = false;
+  const UNAPPLIED_NATIVE_STATS_LS_KEY = "spotilocal_unapplied_native_stats";
+  const _unappliedNativeStats = (() => {
+    try {
+      const raw = localStorage.getItem(UNAPPLIED_NATIVE_STATS_LS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.slice(-1000);
+      }
+    } catch (e) {}
+    return [];
+  })();
+
+  function _persistUnappliedNativeStats() {
+    try {
+      if (_unappliedNativeStats.length > 0) {
+        localStorage.setItem(UNAPPLIED_NATIVE_STATS_LS_KEY, JSON.stringify(_unappliedNativeStats.slice(-1000)));
+      } else {
+        localStorage.removeItem(UNAPPLIED_NATIVE_STATS_LS_KEY);
+      }
+    } catch (e) {}
+  }
+
+  function _enqueueNativeStatRecord(rec) {
+    if (!rec || !rec.songId) return;
+    const secs = (typeof rec.seconds === "number" && Number.isFinite(rec.seconds)) ? rec.seconds : 0;
+    const scrobble = Boolean(rec.scrobble);
+    if (secs < 0 || secs > 3600) return;
+    if (secs === 0 && !scrobble) return;
+    if (typeof isSongDeleted === "function" && isSongDeleted(rec.songId)) return;
+    _unappliedNativeStats.push({
+      songId: String(rec.songId),
+      seconds: secs,
+      scrobble,
+      timestamp: (typeof rec.timestamp === "number" && Number.isFinite(rec.timestamp)) ? rec.timestamp : Date.now(),
+      _misses: 0
+    });
+    if (_unappliedNativeStats.length > 1000) {
+      _unappliedNativeStats.splice(0, _unappliedNativeStats.length - 1000);
+    }
+    _persistUnappliedNativeStats();
+  }
+
+  function flushUnappliedNativeStats() {
+    // Also drain any persisted pending stats once library hydration has completed
+    if (
+      !_drainingNativeStatsBridge &&
+      (_libraryInitialHydrationDone || songs.length > 0) &&
+      typeof window.SpotiLocalNativePlayer !== "undefined" &&
+      window.SpotiLocalNativePlayer.drainListeningStats
+    ) {
+      _drainingNativeStatsBridge = true;
+      try {
+        const raw = window.SpotiLocalNativePlayer.drainListeningStats();
+        if (raw && raw !== "[]") {
+          const records = JSON.parse(raw);
+          if (Array.isArray(records)) {
+            for (let i = 0; i < records.length; i++) {
+              _enqueueNativeStatRecord(records[i]);
+            }
+          }
+        }
+      } catch (e) {}
+      finally {
+        _drainingNativeStatsBridge = false;
+      }
+    }
+
+    if (_unappliedNativeStats.length === 0) return false;
+    if (!_libraryInitialHydrationDone && songs.length === 0) return false;
+
+    const batch = _unappliedNativeStats.splice(0, _unappliedNativeStats.length);
+    const unresolved = [];
+    const perSongBatch = new Map();
+    let totalPlaylistDelta = 0;
+
+    for (let i = 0; i < batch.length; i++) {
+      const rec = batch[i];
+      if (!rec || !rec.songId) continue;
+      if (typeof isSongDeleted === "function" && isSongDeleted(rec.songId)) {
+        continue;
+      }
+
+      const masterSong = songs.find(s => s && s.id === rec.songId)
+        || currentQueue.find(s => s && s.id === rec.songId);
+
+      if (!masterSong) {
+        rec._misses = (rec._misses || 0) + 1;
+        if (!_libraryInitialHydrationDone || songs.length === 0 || rec._misses < 20) {
+          unresolved.push(rec);
+        }
+        continue;
+      }
+
+      const secsToRecord = Math.round((rec.seconds || 0) * 100) / 100;
+      const scrobbleInc = rec.scrobble ? 1 : 0;
+      if (secsToRecord <= 0 && scrobbleInc === 0) continue;
+
+      let agg = perSongBatch.get(masterSong.id);
+      if (!agg) {
+        agg = {
+          masterSong,
+          deltaSeconds: 0,
+          deltaPlays: 0,
+          logs: []
+        };
+        perSongBatch.set(masterSong.id, agg);
+      }
+      agg.deltaSeconds = Math.round((agg.deltaSeconds + secsToRecord) * 100) / 100;
+      agg.deltaPlays += scrobbleInc;
+      agg.logs.push({
+        seconds: secsToRecord,
+        scrobbles: scrobbleInc,
+        timestamp: rec.timestamp || Date.now()
+      });
+      totalPlaylistDelta = Math.round((totalPlaylistDelta + secsToRecord) * 100) / 100;
+    }
+
+    if (unresolved.length > 0) {
+      _unappliedNativeStats.unshift(...unresolved);
+      if (_unappliedNativeStats.length > 1000) {
+        _unappliedNativeStats.splice(1000);
+      }
+    }
+    _persistUnappliedNativeStats();
+
+    if (perSongBatch.size === 0) return false;
+
+    perSongBatch.forEach(agg => {
+      const masterSong = agg.masterSong;
+      const ledgerStats = recordSongLedgerMonotonic(masterSong, agg.deltaSeconds, agg.deltaPlays);
+      masterSong.totalTimeListened = ledgerStats.totalTimeListened;
+      masterSong.playCount = ledgerStats.playCount;
+
+      const queueSong = currentQueue.find(s => s && s.id === masterSong.id);
+      if (queueSong && queueSong !== masterSong) {
+        queueSong.totalTimeListened = masterSong.totalTimeListened;
+        queueSong.playCount = masterSong.playCount;
+      }
+
+      if (agg.deltaPlays > 0 && currentSongIndex !== -1 && currentQueue[currentSongIndex]?.id === masterSong.id) {
+        hasScrobbledCurrentPlay = true;
+      }
+
+      for (let j = 0; j < agg.logs.length; j++) {
+        const entry = agg.logs[j];
+        recordListeningLog(masterSong.id, entry.seconds, activePlaylistId, entry.timestamp, entry.scrobbles);
+      }
+
+      try {
+        musicDB.syncListeningStats(
+          masterSong.id,
+          agg.deltaSeconds,
+          masterSong.totalTimeListened,
+          masterSong.playCount
+        );
+      } catch (e) {}
+    });
+
+    if (totalPlaylistDelta > 0 && activePlaylistId && playlists) {
+      const pl = playlists.find(p => p.id === activePlaylistId);
+      if (pl) {
+        pl.totalTimeListened = Math.round(((pl.totalTimeListened || 0) + totalPlaylistDelta) * 100) / 100;
+        try { musicDB.savePlaylist(pl); } catch (e) {}
+      }
+    }
+
+    saveCachedSongs(songs);
+    scheduleDurableBackup();
+    renderHomeStats();
+    try { renderWrappedStats(); } catch (e) {}
+    try { renderRankingView(); } catch (e) {}
+    return true;
+  }
 
   function applyNativeListeningStats() {
-    if (typeof window.SpotiLocalNativePlayer === "undefined" || !window.SpotiLocalNativePlayer.drainListeningStats) return;
-    try {
-      const raw = window.SpotiLocalNativePlayer.drainListeningStats();
-      if (!raw || raw === "[]") return;
-      const records = JSON.parse(raw);
-      if (!Array.isArray(records) || records.length === 0) return;
-
-      let statsChanged = false;
-      records.forEach(rec => {
-        if (!rec || !rec.songId || typeof rec.seconds !== "number" || rec.seconds <= 0) return;
-
-        const secsToRecord = Math.round(rec.seconds * 100) / 100;
-        const masterSong = songs.find(s => s.id === rec.songId) || currentQueue.find(s => s.id === rec.songId);
-
-        if (masterSong) {
-          const ledgerStats = recordSongLedgerMonotonic(masterSong, secsToRecord, rec.scrobble ? 1 : 0);
-          masterSong.totalTimeListened = ledgerStats.totalTimeListened;
-
-          const queueSong = currentQueue.find(s => s.id === rec.songId);
-          if (queueSong && queueSong !== masterSong) {
-            queueSong.totalTimeListened = masterSong.totalTimeListened;
-          }
-
-          if (rec.scrobble) {
-            masterSong.playCount = ledgerStats.playCount;
-            if (queueSong && queueSong !== masterSong) {
-              queueSong.playCount = masterSong.playCount;
-            }
-            if (currentSongIndex !== -1 && currentQueue[currentSongIndex]?.id === rec.songId) {
-              hasScrobbledCurrentPlay = true;
+    _lastNativeStatsDrainAt = Date.now();
+    if (_drainingNativeStatsBridge) {
+      return flushUnappliedNativeStats();
+    }
+    if (typeof window.SpotiLocalNativePlayer !== "undefined" && window.SpotiLocalNativePlayer.drainListeningStats) {
+      _drainingNativeStatsBridge = true;
+      try {
+        const raw = window.SpotiLocalNativePlayer.drainListeningStats();
+        if (raw && raw !== "[]") {
+          const records = JSON.parse(raw);
+          if (Array.isArray(records) && records.length > 0) {
+            for (let i = 0; i < records.length; i++) {
+              _enqueueNativeStatRecord(records[i]);
             }
           }
-
-          _persistedGlobalTotalSeconds = Math.round(((_persistedGlobalTotalSeconds || 0) + secsToRecord) * 100) / 100;
-          _persistedYearlyTotalSeconds = Math.round(((_persistedYearlyTotalSeconds || 0) + secsToRecord) * 100) / 100;
-          try {
-            localStorage.setItem("spotilocal_global_total_secs", String(_persistedGlobalTotalSeconds));
-            localStorage.setItem(`spotilocal_yearly_total_secs_${new Date().getFullYear()}`, String(_persistedYearlyTotalSeconds));
-          } catch(e) {}
-
-          recordListeningLog(masterSong.id, secsToRecord, activePlaylistId, rec.timestamp || Date.now());
-
-          if (activePlaylistId && playlists) {
-            const pl = playlists.find(p => p.id === activePlaylistId);
-            if (pl) {
-              pl.totalTimeListened = Math.round(((pl.totalTimeListened || 0) + secsToRecord) * 100) / 100;
-              try { musicDB.savePlaylist(pl); } catch(e) {}
-            }
-          }
-
-          try { musicDB.recordListeningTime(masterSong.id, secsToRecord); } catch(e) {}
-          try { musicDB.saveSong(masterSong); } catch(e) {}
-
-          statsChanged = true;
         }
-      });
-
-      if (statsChanged) {
-        saveCachedSongs(songs);
-        renderHomeStats();
-        try { renderRankingView(); } catch(e) {}
+      } catch (e) {}
+      finally {
+        _drainingNativeStatsBridge = false;
       }
-    } catch(e) {}
+    }
+    return flushUnappliedNativeStats();
   }
 
   function hydrateFromNativePlayerState(allowWarmUp = true) {
@@ -4986,6 +6338,7 @@ async function initSpotiLocalApp() {
       const st = JSON.parse(raw);
       if (st.mediaId) {
         usingNativePlayback = true;
+        _nativeLastIsPlaying = Boolean(st.isPlaying);
         if (typeof st.shuffle === "boolean") {
           isShuffle = st.shuffle;
           if (btnShuffle) btnShuffle.classList.toggle("active", isShuffle);
@@ -5030,6 +6383,9 @@ async function initSpotiLocalApp() {
           window.SpotiLocalNativePlayer.warmUp();
         }
       }
+      if (_libraryInitialHydrationDone || songs.length > 0) {
+        applyNativeListeningStats();
+      }
     } catch(e) {}
   }
 
@@ -5044,15 +6400,26 @@ async function initSpotiLocalApp() {
         return;
       }
       try {
-        applyNativeListeningStats();
-
         const raw = window.SpotiLocalNativePlayer.getState();
         if (!raw) return;
         const st = JSON.parse(raw);
 
+        const nowMs = Date.now();
+        const trackChanged = Boolean(st.mediaId && st.mediaId !== _nativeLastMediaId);
+        const justPaused = Boolean(_nativeLastIsPlaying && !st.isPlaying);
+        const justEnded = Boolean(st.ended && !_nativeLastEnded);
+        _nativeLastIsPlaying = Boolean(st.isPlaying);
+
+        if ((_libraryInitialHydrationDone || songs.length > 0) &&
+            ((nowMs - _lastNativeStatsDrainAt >= 3000) || trackChanged || justPaused || justEnded)) {
+          applyNativeListeningStats();
+        }
+
         if (st.error && !_nativeOfflineFallbackAttempted) {
           _nativeOfflineFallbackAttempted = true;
-          if (!isNativeBridgeAvailable()) {
+          const activeTrack = currentQueue[currentSongIndex];
+          const canFallbackToLocalBlob = Boolean(activeTrack && (activeTrack.hasAudioBlob || activeTrack.audioBlob instanceof Blob));
+          if (!isNativeBridgeAvailable() || canFallbackToLocalBlob) {
             usingNativePlayback = false;
             serverAudioProbe.ok = false;
             serverAudioProbe.checkedAt = 0;
@@ -5064,8 +6431,10 @@ async function initSpotiLocalApp() {
           return;
         }
 
-        if (st.mediaId && st.mediaId !== _nativeLastMediaId) {
+        if (trackChanged) {
           _nativeLastMediaId = st.mediaId;
+          lastTimeUpdate = 0;
+          lastProgressWallTime = 0;
           let nativeIndex = currentQueue.findIndex(song => song.id === st.mediaId);
           if (nativeIndex === -1) {
             const pendingIndex = pendingQueue.findIndex(song => song.id === st.mediaId);
@@ -5118,9 +6487,8 @@ async function initSpotiLocalApp() {
         }
 
         // Handle song ended
-        if (st.ended && !_nativeLastEnded) {
+        if (justEnded) {
           _nativeLastEnded = true;
-          applyNativeListeningStats();
           // Auto-advance
           if (repeatMode === 2) {
             loadAndPlayCurrentSong();
@@ -5143,18 +6511,24 @@ async function initSpotiLocalApp() {
   }
 
   // Save listened seconds continuously every 5 seconds or on pause/unload
-  function recordCurrentSongTime() {
-    if (currentSongIndex !== -1 && currentSongListenedSeconds >= 1) {
+  function recordCurrentSongTime(forceFlush = false) {
+    const minSec = forceFlush ? 0.25 : 1;
+    if (currentSongIndex !== -1 && currentSongListenedSeconds >= minSec) {
       const song = currentQueue[currentSongIndex];
       if (song) {
-        const secsToRecord = currentSongListenedSeconds;
+        const secsToRecord = Math.min(60, Math.round(currentSongListenedSeconds * 100) / 100);
         currentSongListenedSeconds = 0;
+        if (secsToRecord <= 0) return;
 
         // Update master song object and ledger
         const masterSong = songs.find(s => s.id === song.id) || song;
         const ledgerStats = recordSongLedgerMonotonic(masterSong, secsToRecord, 0);
         masterSong.totalTimeListened = ledgerStats.totalTimeListened;
-        song.totalTimeListened = masterSong.totalTimeListened;
+        masterSong.playCount = ledgerStats.playCount;
+        if (song !== masterSong) {
+          song.totalTimeListened = masterSong.totalTimeListened;
+          song.playCount = masterSong.playCount;
+        }
 
         // Update playlist time if playing from playlist (no double counting)
         if (activePlaylistId && playlists) {
@@ -5165,24 +6539,25 @@ async function initSpotiLocalApp() {
           }
         }
 
-        _persistedGlobalTotalSeconds = Math.round(((_persistedGlobalTotalSeconds || 0) + secsToRecord) * 100) / 100;
-        _persistedYearlyTotalSeconds = Math.round(((_persistedYearlyTotalSeconds || 0) + secsToRecord) * 100) / 100;
-        try {
-          localStorage.setItem("spotilocal_global_total_secs", String(_persistedGlobalTotalSeconds));
-          localStorage.setItem(`spotilocal_yearly_total_secs_${new Date().getFullYear()}`, String(_persistedYearlyTotalSeconds));
-        } catch(e) {}
-
         // Single log entry for time-based stats
-        recordListeningLog(masterSong.id, secsToRecord, activePlaylistId);
+        recordListeningLog(masterSong.id, secsToRecord, activePlaylistId, Date.now(), 0);
 
         // Keep a synchronous metadata backup in case the WebView closes before IndexedDB resolves.
         saveCachedSongs(songs);
+        scheduleDurableBackup();
 
-        musicDB.recordListeningTime(masterSong.id, secsToRecord).then(() => {
+        Promise.resolve(
+          musicDB.syncListeningStats(
+            masterSong.id,
+            secsToRecord,
+            masterSong.totalTimeListened,
+            masterSong.playCount
+          )
+        ).then(() => {
           saveCachedSongs(songs);
           renderHomeStats();
           try { renderRankingView(); } catch(e){}
-        });
+        }).catch(() => {});
       }
     }
   }
@@ -5190,33 +6565,42 @@ async function initSpotiLocalApp() {
   // Periodic flush every 5 seconds while playing
   setInterval(() => {
     if (isPlaying && currentSongListenedSeconds >= 3) {
-      recordCurrentSongTime();
+      recordCurrentSongTime(false);
     }
   }, 5000);
 
-  audioElement.addEventListener("pause", recordCurrentSongTime);
+  audioElement.addEventListener("pause", () => {
+    recordCurrentSongTime(true);
+    scheduleDurableBackup();
+  });
   window.addEventListener("beforeunload", () => {
-    if (usingNativePlayback) applyNativeListeningStats();
-    else recordCurrentSongTime();
+    if (usingNativePlayback && (_libraryInitialHydrationDone || songs.length > 0)) applyNativeListeningStats();
+    else recordCurrentSongTime(true);
+    flushDurableBackupNow();
   });
   window.addEventListener("pagehide", () => {
-    if (usingNativePlayback) applyNativeListeningStats();
-    else recordCurrentSongTime();
+    if (usingNativePlayback && (_libraryInitialHydrationDone || songs.length > 0)) applyNativeListeningStats();
+    else recordCurrentSongTime(true);
+    flushDurableBackupNow();
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       if (isNativeBridgeAvailable()) {
         hydrateFromNativePlayerState(false);
-        applyNativeListeningStats();
+        if (_libraryInitialHydrationDone || songs.length > 0) applyNativeListeningStats();
       } else {
-        recordCurrentSongTime();
+        recordCurrentSongTime(true);
       }
+    } else if (document.visibilityState === "hidden") {
+      if (usingNativePlayback && (_libraryInitialHydrationDone || songs.length > 0)) applyNativeListeningStats();
+      else recordCurrentSongTime(true);
+      flushDurableBackupNow();
     }
   });
   window.addEventListener("focus", () => {
     if (isNativeBridgeAvailable()) {
       hydrateFromNativePlayerState(false);
-      applyNativeListeningStats();
+      if (_libraryInitialHydrationDone || songs.length > 0) applyNativeListeningStats();
     }
   });
 
@@ -5274,20 +6658,18 @@ async function initSpotiLocalApp() {
           isLiked: false,
           playCount: 0,
           totalTimeListened: 0,
+          statsIsolated: true,
+          hasAudioBlob: true,
           dateAdded: Date.now()
         };
 
-        const ledgerStats = (typeof getSongLedgerStats === "function") ? getSongLedgerStats(songObj) : null;
-        if (ledgerStats) {
-          songObj.totalTimeListened = ledgerStats.totalTimeListened || 0;
-          songObj.playCount = ledgerStats.playCount || 0;
-        }
         if (typeof recordSongLedgerMonotonic === "function") {
-          recordSongLedgerMonotonic(songObj, 0, 0);
+          recordSongLedgerMonotonic(songObj, 0, 0, true);
         }
 
-        await musicDB.saveSong(songObj);
+        await musicDB.saveSong(songObj, { forceExactStats: true });
         await loadSongsFromDB();
+        scheduleDurableBackup();
 
         cloudStatusText.textContent = "¡Canción FLAC guardada con éxito!";
         setTimeout(() => {
@@ -5373,23 +6755,20 @@ async function initSpotiLocalApp() {
             genre: item.genre,
             year: "2026",
             audioBlob: blob,
+            hasAudioBlob: true,
             coverBlob: null,
             isLiked: i === 0, // Like first song automatically
             playCount: 0,
             totalTimeListened: 0,
+            statsIsolated: true,
             dateAdded: Date.now() - (i * 1000)
           };
 
-          const ledgerStats = (typeof getSongLedgerStats === "function") ? getSongLedgerStats(songObj) : null;
-          if (ledgerStats) {
-            songObj.totalTimeListened = ledgerStats.totalTimeListened || 0;
-            songObj.playCount = ledgerStats.playCount || 0;
-          }
           if (typeof recordSongLedgerMonotonic === "function") {
-            recordSongLedgerMonotonic(songObj, 0, 0);
+            recordSongLedgerMonotonic(songObj, 0, 0, true);
           }
 
-          await musicDB.saveSong(songObj);
+          await musicDB.saveSong(songObj, { forceExactStats: true });
           loadedCount++;
         } catch (e) {
           console.warn("Preset load warning:", e);
@@ -5493,6 +6872,7 @@ async function initSpotiLocalApp() {
           targetSong.title = title;
           targetSong.artist = artist;
           targetSong.album = album;
+          targetSong.needsReview = isGenericSongTitle(title);
           if (tempEditCoverBlob instanceof Blob) {
             targetSong.coverBlob = tempEditCoverBlob;
             targetSong.coverUrl = null;
@@ -5502,22 +6882,75 @@ async function initSpotiLocalApp() {
             targetSong.coverBlob = null;
             coverObjectUrlCache.delete(editingSongId);
           }
-          await musicDB.saveSong(targetSong);
+
+          // Prevent renaming a song from colliding with or overwriting another song's canonical ledger stats
+          if (!targetSong.statsIsolated && typeof normalizeStrictMeta === "function") {
+            const normA = normalizeStrictMeta(artist);
+            const normT = normalizeStrictMeta(title);
+            const candidateKey = (normA && normT && !isGenericArtistName(artist) && !isGenericSongTitle(title))
+              ? `${normA}:::${normT}`
+              : "";
+            const hasSameMetaSibling = candidateKey && songs.some(s =>
+              s && s.id !== editingSongId &&
+              normalizeStrictMeta(s.artist) === normA &&
+              normalizeStrictMeta(s.title) === normT
+            );
+            const ledger = (typeof getSongStatsLedger === "function") ? getSongStatsLedger() : null;
+            const existingOwner = (candidateKey && ledger && ledger.bySongId)
+              ? Object.keys(ledger.bySongId).find(sid => sid !== editingSongId && ledger.bySongId[sid] === candidateKey)
+              : null;
+            if (hasSameMetaSibling || existingOwner || (candidateKey && ledger && ledger.canonical && ledger.canonical[candidateKey] && ledger.bySongId[editingSongId] !== candidateKey)) {
+              targetSong.statsIsolated = true;
+            }
+          }
+
+          const syncQueueCopy = (arr) => {
+            if (!Array.isArray(arr)) return false;
+            const m = arr.find(s => s && s.id === editingSongId);
+            if (m && m !== targetSong) {
+              m.title = title;
+              m.artist = artist;
+              m.album = album;
+              m.needsReview = targetSong.needsReview;
+              m.statsIsolated = Boolean(targetSong.statsIsolated);
+              if (tempEditCoverBlob instanceof Blob) {
+                m.coverBlob = tempEditCoverBlob;
+                m.coverUrl = null;
+              } else if (tempEditCoverUrl) {
+                m.coverUrl = tempEditCoverUrl;
+                m.coverBlob = null;
+              }
+              return true;
+            }
+            return Boolean(m);
+          };
+          const inActiveQueue = syncQueueCopy(currentQueue);
+          syncQueueCopy(unshuffledQueue);
+          syncQueueCopy(pendingQueue);
+          if (inActiveQueue && typeof syncNativeQueue === "function") {
+            syncNativeQueue();
+          }
+          if (typeof recordSongLedgerMonotonic === "function") {
+            recordSongLedgerMonotonic(targetSong, 0, 0, true);
+          }
+          await musicDB.saveSong(targetSong, { forceExactStats: true });
         } else {
           await musicDB.updateSongMeta(editingSongId, title, artist, album);
         }
 
         editMetaModal.classList.add("hidden");
         saveCachedSongs(songs);
+        scheduleDurableBackup();
         _libraryTableDirty = true;
         renderSongsTable(songs);
         renderRecentGrid(songs.slice(0, 6));
         renderFavoritesGrid(songs.filter(s => s.isLiked));
         renderWrappedStats();
-        if (currentSong && currentSong.id === editingSongId) {
-          if (targetSong) currentSong = targetSong;
-          updatePlayerMetadata(currentSong);
+        const activeTrack = (currentSongIndex >= 0 && currentQueue[currentSongIndex]) ? currentQueue[currentSongIndex] : null;
+        if (activeTrack && activeTrack.id === editingSongId) {
+          updatePlayerMetadata(targetSong || activeTrack);
         }
+        editingSongId = null;
         if (typeof showToast === "function") {
           showToast("¡Canción y carátula actualizadas con éxito! 🎨");
         }

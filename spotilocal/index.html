@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>SpotiLocal Pro v1.8.4 - Tu Música Sin Límites</title>
+  <title>SpotiLocal Pro v1.8.7 - Tu Música Sin Límites</title>
   <meta name="description" content="Reproductor de música local offline para móvil y PC con ecualizador, letras y diseño estilo Spotify.">
   <meta name="theme-color" content="#121212">
   <meta name="mobile-web-app-capable" content="yes">
@@ -23,7 +23,7 @@
   <!-- FontAwesome Icons (Non-blocking asynchronous load) -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" media="print" onload="this.media='all'">
   
-  <link rel="stylesheet" href="styles.css?v=1.8.4">
+  <link rel="stylesheet" href="styles.css?v=1.8.7">
 </head>
 <body>
   <!-- Ambient Dynamic Glow Backdrop -->
@@ -522,6 +522,10 @@
                   <button id="btn-export-db" class="secondary-btn" onclick="window.exportDatabase()">
                     <i class="fa-solid fa-file-export"></i> Exportar Datos
                   </button>
+                  <button id="btn-import-db" class="secondary-btn" onclick="document.getElementById('import-db-input')?.click()">
+                    <i class="fa-solid fa-file-import"></i> Importar Copia
+                  </button>
+                  <input type="file" id="import-db-input" accept=".json,application/json" style="display:none" onchange="if(this.files && this.files[0]) { window.importDatabase(this.files[0]); this.value = ''; }">
                   <button id="btn-clear-db" class="danger-btn" onclick="window.clearDatabase()">
                     <i class="fa-solid fa-trash-can"></i> Borrar Todo
                   </button>
@@ -532,8 +536,8 @@
             <div class="settings-card info-card">
               <i class="fa-solid fa-circle-info"></i>
               <div>
-                <h4 id="app-version-label">SpotiLocal Pro v1.8.4</h4>
-                <p id="app-build-label" style="font-size:12px; color:var(--spotify-grey); margin-bottom:4px;">Versión 1.8.4 · Build #75 (Estadísticas Blindadas, Recortes &amp; Ganancia ±30dB)</p>
+                <h4 id="app-version-label">SpotiLocal Pro v1.8.7</h4>
+                <p id="app-build-label" style="font-size:12px; color:var(--spotify-grey); margin-bottom:4px;">Versión 1.8.7 · Build #79 (Integridad Total, Scrobble Exacto &amp; Exportación Nativa)</p>
                 <p>Desarrollado para reproducción offline de alta calidad en tu smartphone. Almacenamiento seguro en tu navegador vía IndexedDB.</p>
               </div>
             </div>
@@ -955,10 +959,10 @@
   <audio id="main-audio-element" preload="auto"></audio>
 
   <!-- JS Dependencies -->
-  <script src="id3-parser.js?v=1.8.4"></script>
-  <script src="db.js?v=1.8.4"></script>
-  <script src="audio-engine.js?v=1.8.4"></script>
-  <script src="app.js?v=1.8.4"></script>
+  <script src="id3-parser.js?v=1.8.7"></script>
+  <script src="db.js?v=1.8.7"></script>
+  <script src="audio-engine.js?v=1.8.7"></script>
+  <script src="app.js?v=1.8.7"></script>
 
   <!-- Service Worker Registration for Web/PWA only (strictly blocked on Native Android APK) -->
   <script>
@@ -973,7 +977,7 @@
     );
     if (!isNativeApp && 'serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=162').catch(() => {});
+        navigator.serviceWorker.register('./sw.js?v=166').catch(() => {});
       });
     } else if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations().then(registrations => {

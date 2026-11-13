@@ -1,4 +1,4 @@
-const CACHE_NAME = 'spotipirata-pwa-v163';
+const CACHE_NAME = 'spotipirata-pwa-v166';
 const STATIC_ASSETS = [
   './',
   './index.html',

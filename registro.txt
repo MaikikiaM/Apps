@@ -1119,4 +1119,86 @@ ACTUALIZACIÓN CRÍTICA FORENSE v1.8.4 (07/11/2026 - 19:55):
      * Paridad SHA-256 byte a byte verificada al 100% entre raíz y assets del APK nativo.
 ================================================================================
 
+================================================================================
+SESIÓN: 13/11/2026 - V1.8.5 EXACTITUD ESTRICTA POR CANCIÓN Y RECUPERACIÓN SEGURA
+================================================================================
+- Versión: v1.8.5 (Build #77, versionCode 27)
+- Cambios y Soluciones Aplicadas:
+  1. Eliminación de Contaminación Cruzada por Subcadenas en Estadísticas:
+     * Reemplazado matching difuso `.includes()` en `calculateSongStatsFromLogs`, `resolveLogSongId` y fusión `/api/songs` por coincidencia exacta de `id` o metadatos canónicos no genéricos (`normalizeStrictMeta` + `!isGenericSongTitle`).
+     * Migración automática a Ledger v2 (`spotilocal_song_ledger_v2` / `song_stats_ledger_v2`) aislando títulos genéricos o desconocidos bajo clave única `id:::${id}`.
+     * Añadido `sanitizeCorruptedSongStats()` para detectar y corregir estadísticas infladas por fugas históricas de subcadenas comparando contra `computeLegacySubstringAuditSeconds()` y recalculando desde logs exactos.
+  2. Eliminación Completa de Suelos Manuales e Inflación Global:
+     * Eliminadas las variables `_persistedHistoricalFloorSeconds`, `_persistedGlobalTotalSeconds` y `_persistedYearlyTotalSeconds`, junto con `purgeLegacyArtificialStats()` para limpiar claves heredadas de localStorage e IndexedDB.
+     * Limitados los ticks de escucha en `recordCurrentSongTime()` (máx. 60s por tick) y bloques en `applyNativeListeningStats()` (descarte > 3600s).
+  3. Blindaje de Persistencia e Integridad de Biblioteca:
+     * `db.js`: `getAllSongs()` y `getAllBlobRecords()` ahora iteran clave a clave mediante `getAllKeys()` para evitar fallos silenciosos (`[]`) del límite Mojo IPC de Chromium WebView.
+     * `db.js`: `saveSong()` / `saveSongMeta()` soportan `{ forceExactStats: true }` para permitir saneamiento exacto cuando corresponde.
+     * Eliminado bloqueo por `"title_"` en `getDeletedSongIds`/`markSongAsDeleted`, endurecido `matchCanonicalPreset()`, priorizadas etiquetas ID3 en `reEnrichSongMetadata()`, y suprimida la creación de entradas fantasma `"Canción Histórica"` en `repairAndRecoverLibrary()`.
+- Verificación:
+  * `node --check app.js` y `node --check db.js` sin errores.
+  * Compilado y empaquetado mediante `apk-build/release.ps1 -Version "1.8.5"`.
+================================================================================
 
+================================================================================
+SESIÓN: 13/11/2026 - V1.8.6 BLINDAJE ATÓMICO, AISLAMIENTO TOTAL Y COPIA NATIVA DURABLE
+================================================================================
+- Versión: v1.8.6 (Build #78, versionCode 28)
+- Artefacto publicado: SpotiLocal_v1.8.6.apk (7,522,824 bytes, espejado a SpotiLocal.apk)
+- Cambios y Soluciones Aplicadas:
+  1. Eliminación Total de Condiciones de Carrera y Doble Conteo (db.js, app.js, PlaybackService.java):
+     * db.js: Añadidas colas FIFO por canción (`_enqueueSongWrite`) y por ajuste (`_enqueueSettingWrite`), `syncListeningStats()` atómico, `saveSongBlob()`, `getAllLyrics()` y protección para que snapshots obsoletos de `saveSong()`/`saveSongMeta()` no reviertan `isLiked` ni estadísticas.
+     * app.js: Añadido buffer `_unappliedNativeStats` + `flushUnappliedNativeStats()` hasta hidratar `songs`; procesamiento por lotes por `songId` con `syncListeningStats()`; poller throttled a 3000ms (drenaje inmediato en cambio de pista/pausa/fin); protección `if (usingNativePlayback) return;` en `ended` HTML5 y conteo exacto de `scrobbles` en logs y fragmentos recortados.
+     * Android (`PlaybackStatsTracker.java`, `PlaybackService.java`): Extraída máquina de estados pura testeable con acumulación en transiciones aunque ExoPlayer pase a detenido, y escritura síncrona `.commit()` al drenar o detener el servicio.
+  2. Aislamiento Estricto de Pistas Nuevas y Artistas Genéricos:
+     * Añadido `isGenericArtistName()` ("Artista Local", "Artista Desconocido", "Desconocido", "Unknown", "Unknown Artist", "Nube Cloud Track", etc.) en `getSongCanonicalKey()` (`id:::<id>`).
+     * `handleFilesSelect()` y `btnStartCloudDownload` inicializan pistas nuevas estrictamente en `0` (`statsIsolated: true`, `{ forceExactStats: true }`) sin heredar historial previo del ledger.
+     * Corregido `untangleLegacySharedGenericLedgerKeys()` para limpiar cubos `...:::` vacíos/genéricos y colisiones reales entre canciones activas.
+     * Corregido error crítico de duplicación 2x->4x->8x en `restoreListeningLogsFromDB()` sustituyendo la concatenación de snapshots por `mergeListeningLogSources()` con singleton `_restoreLogsInFlight`.
+  3. Saneamiento < 10h, Eliminación de ReferenceErrors y Copia Nativa Durable:
+     * Ampliado `sanitizeCorruptedSongStats()` para reparar corrupción < 10h y `playCount` físicamente imposibles respetando estadísticas legítimas.
+     * Creado `NativeBackupStore.java` (escritura atómica `.tmp` + `fsync` + `.bak` fuera del WebView en `files/spotilocal_backup_v1.json`), métodos en `NativePlayerBridge.java`, rechazo de caché nativo de 0 bytes en `NativeAudioStore.findAudioFile()` y limpieza en `deleteAudioFile()`.
+     * Añadido `window.importDatabase()` + `#btn-import-db` en `index.html`, protección `navigator.storage.persist()`, caché `sw.js` `v165`, y corrección de `ReferenceError: currentSong` en `reEnrichSongMetadata()`, `deleteSong()` y `saveEditedMetadata()`.
+- Pruebas Automatizadas Ejecutadas:
+  * `node --test tests/spotilocal.test.mjs`: 14/14 pruebas pasadas (db.js concurrencia + app.js aislamiento, logs, saneamiento, recuperación y UI handlers).
+  * `gradlew.bat :app:testDebugUnitTest`: 6/6 pruebas JUnit4 pasadas (`NativePersistenceAndStatsTest` + `ExampleUnitTest`).
+  * Paridad SHA-256 verificada 100% entre raíz, `apk-build/www`, `assets/public` y el interior de `SpotiLocal_v1.8.6.apk`.
+================================================================================
+
+================================================================================
+SESIÓN: 13/11/2026 - V1.8.7 AUDITORÍA ESCÉPTICA INTEGRAL, TRANSACCIONES ATÓMICAS Y BLINDAJE NATIVO
+================================================================================
+- Versión: v1.8.7 (Build #79, versionCode 29)
+- Artefacto publicado: SpotiLocal_v1.8.7.apk (7,527,964 bytes, SHA-256 1958B716BF7AA3F2CACFD1DAB26BF9C686FE202817446E18A67ECF89FC66123D, espejado a SpotiLocal.apk)
+- Cambios y Soluciones Aplicadas:
+  1. Integridad Transaccional y Lectura Consistente en IndexedDB (`db.js`):
+     * Todas las escrituras en canciones, blobs, letras, playlists y ajustes esperan estrictamente a `tx.oncomplete` y rechazan fallos síncronos/asíncronos (`tx.onerror`, `tx.onabort`, `getReq.onerror` + `try/catch` en `onsuccess`).
+     * Añadidas deduplicación `_initPromise`, `close()`, `onversionchange`, colas FIFO por playlist (`_playlistWriteQueues`), read-your-writes en `getSong`/`getPlaylist`/`getSetting`, y limpieza de letras/colas al borrar.
+     * Evitado el incremento de estadísticas globales en `recordListeningTime`/`syncListeningStats` para IDs huérfanos inexistentes.
+  2. Ledger Canónico, Saneamiento Seguro y Recuperación (`app.js`):
+     * Corregida `isUnsafeSharedCanonicalKey()` y `untangleLegacySharedGenericLedgerKeys()` para claves `artist:::title` reales, filtrando también entradas heredadas/corruptas en backups e importaciones.
+     * Ajustada `isGenericSongTitle()` para no marcar como genéricos títulos legítimos (p. ej. "Canción Animal", "Tema ..."); suprimida la invención de `dateAdded = Date.now()` al restaurar pistas sin fecha para evitar falsos positivos en `sanitizeCorruptedSongStats()`, añadiendo además detección de imposibilidad temporal frente a `dateAdded`.
+     * Blindados `saveEditedMetadata` (protección contra colisiones con `statsIsolated: true`), `btnLoadPresetRepertoire` (`0` inicial), lectura temprana de `NativeBackupStore` (`{ allowStatsRestore: false, skipSongs: true }`), y llamada `np.hasLocalAudio(ck, ext)` de 2 argumentos.
+  3. Seguimiento Exacto HTML5/Nativo y Almacenamiento Android (`app.js`, Java):
+     * `PlaybackStatsTracker.java` y `PlaybackService.java`: volcado garantizado de scrobbles pendientes (`flushIfEligible`) incluso con tiempo acumulado < umbral, reinicio limpio en pistas cortas (`<= 5s`), y `.commit()` en pausa/fin/cierre.
+     * HTML5 (`app.js`): volcado forzado de pista saliente al cambiar de canción, seguimiento exacto en modo Repetir Uno mediante `ended` (sin `audioElement.loop`), reset al reiniciar/hacer seek al inicio, persistencia de `_unappliedNativeStats` en `localStorage`, y bloqueo correcto con `isSongDeleted` al drenar.
+     * `NativeAudioStore.java` / `NativePlayerBridge.java`: añadidos `clearAllLocalAudio()` (limpiando también ficheros de 0 bytes y restos `.part`) y `exportBackupToDownloads()` vía `MediaStore.Downloads` para Android 10+; limpiados listeners duplicados obsoletos y actualizado `sw.js` a `v166`.
+- Pruebas Automatizadas Ejecutadas:
+  * `node --test tests/spotilocal.test.mjs`: 20/20 pruebas pasadas (4 `MusicDB` + 16 `app.js`).
+  * `gradlew.bat :app:testDebugUnitTest`: 8/8 pruebas JUnit4 pasadas (7 en `NativePersistenceAndStatsTest` + 1 en `ExampleUnitTest`).
+  * Verificación HTTP en vivo contra `server.js` (`/`, `/api/version` -> 1.8.7, `/api/songs` -> 12 pistas, y streaming `Range` 206 `audio/mpeg`) y paridad SHA-256 del 100% entre raíz, `apk-build/www`, `assets/public` y el interior de `SpotiLocal_v1.8.7.apk`.
+================================================================================
+
+================================================================================
+SESIÓN: 13/11/2026 - SINCRONIZACIÓN SPOTILOCAL v1.8.5-v1.8.7 AL MONORREPO APPS
+================================================================================
+- Acción: Migración y sincronización de cambios desde 'C:\Users\migue\Proyectos IA varios\SpotiLocal' hacia 'C:\Users\migue\Antigravity\Apps\spotilocal'.
+- Detalles:
+  * Copiados y verificados por SHA-256 los 30 archivos modificados/nuevos (web, manifests, nativos Java/Gradle, tests JS/Java, documentación y APKs v1.8.5, v1.8.6, v1.8.7 y SpotiLocal.apk), preservando 'spotilocal/package_apk.ps1' adaptado a Apps.
+  * Actualizado catálogo local 'versions/' en 'Apps/spotilocal/versions/' hasta v1.8.7.
+  * Limpiado atributo ReadOnly heredado en 'Apps/spotilocal' que bloqueaba tareas incrementales de Gradle.
+- Verificación en 'C:\Users\migue\Antigravity\Apps\spotilocal':
+  * Sintaxis JS ('node --check'): 7/7 archivos OK.
+  * Suite Node ('node --test tests/spotilocal.test.mjs'): 20/20 pruebas pasadas.
+  * Suite Android JUnit4 ('.\gradlew.bat :app:testDebugUnitTest'): BUILD SUCCESSFUL, 8/8 pruebas pasadas (ExampleUnitTest 1/1 + NativePersistenceAndStatsTest 7/7).
+================================================================================
