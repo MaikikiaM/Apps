@@ -1,11 +1,11 @@
 // src/components/charts/SwimChartsPanel.tsx
-// Gráficas exhaustivas de natación: Totales, Estilos apilados, Curva individual por estilo, Tiempos, Ritmos y Donut
+// Gráficas exhaustivas de natación: KPIs, Totales, Estilos apilados, Curva individual, Ritmos y Donut
 
 import React, { useState, useMemo } from 'react';
 import { ChartCanvas } from '../common/ChartCanvas';
 import { DailyWorkoutLog } from '../../types/models';
 import { ChartConfiguration } from 'chart.js';
-import { formatDurationMmSs } from '../../utils/formatters';
+import { formatDurationMmSs, formatDurationHuman, formatMeters } from '../../utils/formatters';
 
 interface SwimChartsPanelProps {
   logs: DailyWorkoutLog[];
@@ -21,20 +21,38 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [logs]);
 
-  if (swimLogs.length === 0) {
-    return (
-      <div className="card" style={{ textAlign: 'center', padding: '30px 16px', color: '#64748b' }}>
-        No hay sesiones de natación registradas todavía en el periodo seleccionado.
-      </div>
-    );
-  }
+  const kpiStats = useMemo(() => {
+    let totalMeters = 0;
+    let totalDuration = 0;
+    let maxSessionMeters = 0;
+    let bestPaceSec: number | null = null;
 
-  const labels = swimLogs.map(l => l.date.slice(5)); // 'MM-DD'
+    for (const l of swimLogs) {
+      const s = l.swim!;
+      totalMeters += s.totalMeters;
+      totalDuration += s.durationSeconds || 0;
+      if (s.totalMeters > maxSessionMeters) maxSessionMeters = s.totalMeters;
+      if (s.totalMeters >= 100 && s.durationSeconds > 0) {
+        const pace = (s.durationSeconds / s.totalMeters) * 100;
+        if (bestPaceSec === null || pace < bestPaceSec) bestPaceSec = pace;
+      }
+    }
+
+    return {
+      totalMeters,
+      totalDuration,
+      maxSessionMeters,
+      bestPaceDisplay: bestPaceSec !== null ? `${formatDurationMmSs(bestPaceSec)} /100m` : '--:--',
+      sessionsCount: swimLogs.length
+    };
+  }, [swimLogs]);
+
+  const labels = useMemo(() => swimLogs.map(l => l.date.slice(5)), [swimLogs]);
 
   // 1. Gráfica de Metros Totales + Proyección
   const totalMetersConfig: ChartConfiguration = useMemo(() => {
     const data = swimLogs.map(l => l.swim!.totalMeters);
-    const datasets: any[] = [
+    const datasets: ChartConfiguration['data']['datasets'] = [
       {
         label: 'Metros Totales',
         data,
@@ -43,26 +61,25 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
         borderWidth: 2.5,
         fill: true,
         tension: 0.25,
-        pointRadius: 4,
+        pointRadius: 3.5,
         pointBackgroundColor: '#06b6d4'
       }
     ];
 
     if (showProjection && data.length >= 3) {
-      // Proyección simplificada para las siguientes 3 sesiones
       const last = data[data.length - 1];
       const prev = data[0];
       const delta = (last - prev) / Math.max(1, data.length - 1);
-      const proj1 = Math.round(last + delta * 0.7);
-      const proj2 = Math.round(last + delta * 1.3);
+      const proj1 = Math.max(0, Math.round(last + delta * 0.7));
+      const proj2 = Math.max(0, Math.round(last + delta * 1.3));
 
       datasets.push({
-        label: 'Proyección futura',
+        label: 'Proyección',
         data: [...Array(data.length - 1).fill(null), last, proj1, proj2],
         borderColor: '#38bdf8',
         borderDash: [5, 5],
         borderWidth: 2,
-        pointRadius: 4,
+        pointRadius: 3.5,
         pointBackgroundColor: '#38bdf8',
         fill: false
       });
@@ -87,7 +104,7 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
           },
           x: {
             grid: { color: '#1e293b' },
-            ticks: { color: '#94a3b8' }
+            ticks: { color: '#94a3b8', maxTicksLimit: 7 }
           }
         }
       }
@@ -126,9 +143,13 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
             stack: 'strokes'
           },
           {
-            label: 'Otros / Mixto',
+            label: 'Variado',
             data: swimLogs.map(l => {
-              const sum = l.swim!.crawlMeters + l.swim!.backstrokeMeters + l.swim!.breaststrokeMeters + l.swim!.butterflyMeters;
+              const sum =
+                l.swim!.crawlMeters +
+                l.swim!.backstrokeMeters +
+                l.swim!.breaststrokeMeters +
+                l.swim!.butterflyMeters;
               return Math.max(0, l.swim!.totalMeters - sum);
             }),
             backgroundColor: '#64748b',
@@ -138,7 +159,7 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
       },
       options: {
         scales: {
-          x: { stacked: true, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
+          x: { stacked: true, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', maxTicksLimit: 7 } },
           y: { stacked: true, grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
         }
       }
@@ -170,7 +191,7 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
             borderWidth: 2.5,
             fill: true,
             tension: 0.3,
-            pointRadius: 4,
+            pointRadius: 3.5,
             pointBackgroundColor: target.color
           }
         ]
@@ -178,7 +199,7 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
       options: {
         scales: {
           y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
-          x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
+          x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', maxTicksLimit: 7 } }
         }
       }
     };
@@ -188,7 +209,6 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
   const paceConfig: ChartConfiguration = useMemo(() => {
     const validPaceLogs = swimLogs.filter(l => l.swim!.durationSeconds > 0 && l.swim!.totalMeters > 0);
     const paceLabels = validPaceLogs.map(l => l.date.slice(5));
-    // Ritmo en segundos por 100m
     const paceSecs = validPaceLogs.map(l => (l.swim!.durationSeconds / l.swim!.totalMeters) * 100);
 
     return {
@@ -204,7 +224,7 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
             borderWidth: 2.5,
             fill: true,
             tension: 0.2,
-            pointRadius: 4,
+            pointRadius: 3.5,
             pointBackgroundColor: '#34d399'
           }
         ]
@@ -215,15 +235,15 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
             grid: { color: '#1e293b' },
             ticks: {
               color: '#94a3b8',
-              callback: (val) => formatDurationMmSs(Number(val))
+              callback: val => formatDurationMmSs(Number(val))
             }
           },
-          x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
+          x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', maxTicksLimit: 7 } }
         },
         plugins: {
           tooltip: {
             callbacks: {
-              label: (ctx) => `Ritmo: ${formatDurationMmSs(Number(ctx.parsed.y))} /100m`
+              label: ctx => `Ritmo: ${formatDurationMmSs(Number(ctx.parsed.y))} /100m`
             }
           }
         }
@@ -244,14 +264,18 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
       totBack += l.swim!.backstrokeMeters;
       totBreast += l.swim!.breaststrokeMeters;
       totFly += l.swim!.butterflyMeters;
-      const sum = l.swim!.crawlMeters + l.swim!.backstrokeMeters + l.swim!.breaststrokeMeters + l.swim!.butterflyMeters;
+      const sum =
+        l.swim!.crawlMeters +
+        l.swim!.backstrokeMeters +
+        l.swim!.breaststrokeMeters +
+        l.swim!.butterflyMeters;
       totOther += Math.max(0, l.swim!.totalMeters - sum);
     }
 
     return {
       type: 'doughnut',
       data: {
-        labels: ['Crol', 'Espalda', 'Braza', 'Mariposa', 'Otros'],
+        labels: ['Crol', 'Espalda', 'Braza', 'Mariposa', 'Variado'],
         datasets: [
           {
             data: [totCrawl, totBack, totBreast, totFly, totOther],
@@ -269,8 +293,52 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
     };
   }, [swimLogs]);
 
+  // Return temprano DESPUÉS de todos los hooks (evita crash de React al cambiar filtro)
+  if (swimLogs.length === 0) {
+    return (
+      <div className="card" style={{ textAlign: 'center', padding: '30px 16px', color: '#64748b' }}>
+        No hay sesiones de natación registradas todavía en el periodo seleccionado.
+      </div>
+    );
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {/* KPIs Resumen del Periodo */}
+      <div className="stat-grid">
+        <div className="stat-box">
+          <span className="stat-box-label">Volumen Total</span>
+          <span className="stat-box-value" style={{ color: '#06b6d4' }}>
+            {formatMeters(kpiStats.totalMeters)}
+          </span>
+          <span className="stat-box-sub">{kpiStats.sessionsCount} sesiones</span>
+        </div>
+
+        <div className="stat-box">
+          <span className="stat-box-label">Sesión Récord</span>
+          <span className="stat-box-value" style={{ color: '#38bdf8' }}>
+            {formatMeters(kpiStats.maxSessionMeters)}
+          </span>
+          <span className="stat-box-sub">máximo en un día</span>
+        </div>
+
+        <div className="stat-box">
+          <span className="stat-box-label">Mejor Ritmo</span>
+          <span className="stat-box-value" style={{ color: '#34d399', fontSize: '1.1rem' }}>
+            {kpiStats.bestPaceDisplay}
+          </span>
+          <span className="stat-box-sub">récord /100m</span>
+        </div>
+
+        <div className="stat-box">
+          <span className="stat-box-label">Tiempo en Agua</span>
+          <span className="stat-box-value" style={{ color: '#e2e8f0', fontSize: '1.15rem' }}>
+            {formatDurationHuman(kpiStats.totalDuration)}
+          </span>
+          <span className="stat-box-sub">acumulado</span>
+        </div>
+      </div>
+
       {/* 1. Metros Totales */}
       <div className="card">
         <div className="card-header">
@@ -290,7 +358,7 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
             <div className="card-subtitle">Volumen de cada estilo en cada sesión</div>
           </div>
         </div>
-        <ChartCanvas config={stackedStrokesConfig} height={240} />
+        <ChartCanvas config={stackedStrokesConfig} height={235} />
       </div>
 
       {/* 3. Curva Individual por Estilo */}
@@ -304,24 +372,28 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
 
         <div className="tab-pills">
           <button
+            type="button"
             className={`tab-pill ${selectedIndividualStroke === 'crawl' ? 'active' : ''}`}
             onClick={() => setSelectedIndividualStroke('crawl')}
           >
             Crol
           </button>
           <button
+            type="button"
             className={`tab-pill ${selectedIndividualStroke === 'back' ? 'active' : ''}`}
             onClick={() => setSelectedIndividualStroke('back')}
           >
             Espalda
           </button>
           <button
+            type="button"
             className={`tab-pill ${selectedIndividualStroke === 'breast' ? 'active' : ''}`}
             onClick={() => setSelectedIndividualStroke('breast')}
           >
             Braza
           </button>
           <button
+            type="button"
             className={`tab-pill ${selectedIndividualStroke === 'fly' ? 'active' : ''}`}
             onClick={() => setSelectedIndividualStroke('fly')}
           >
@@ -351,7 +423,7 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
             <div className="card-subtitle">Porcentaje total acumulado por estilo</div>
           </div>
         </div>
-        <ChartCanvas config={donutConfig} height={240} />
+        <ChartCanvas config={donutConfig} height={235} />
       </div>
     </div>
   );

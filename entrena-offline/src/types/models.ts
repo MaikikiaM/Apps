@@ -45,6 +45,7 @@ export interface DailyWorkoutLog {
   swim?: SwimSession;
   strength: StrengthEntry[];
   notes?: string;
+  feeling?: 1 | 2 | 3 | 4 | 5; // Sensación / energía percibida (1 = agotado, 5 = excelente)
   updatedAt: number;
 }
 
@@ -59,6 +60,7 @@ export interface AppSettings {
   userName?: string;
   targetSwimMetersWeekly?: number;
   targetDaysWeekly?: number;
+  restTimerDefaultSeconds?: number;
 }
 
 // Normalización unificada para cualquier entrada de fuerza

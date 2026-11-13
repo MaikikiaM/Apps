@@ -33,6 +33,7 @@ interface AppDataContextValue {
   bodyWeights: BodyWeightEntry[];
   settings: AppSettings;
   isLoading: boolean;
+  externalReloadToken: number;
   activeLog: DailyWorkoutLog | null;
   saveCurrentLog: (log: DailyWorkoutLog) => Promise<void>;
   deleteCurrentLog: (date: string) => Promise<void>;
@@ -42,7 +43,7 @@ interface AppDataContextValue {
   updateSettings: (newSettings: AppSettings) => Promise<void>;
   loadDemoAndRefresh: () => Promise<void>;
   clearDataAndRefresh: () => Promise<void>;
-  refreshData: () => Promise<void>;
+  refreshData: (bumpExternalToken?: boolean) => Promise<void>;
 }
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
@@ -52,10 +53,16 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [logs, setLogs] = useState<DailyWorkoutLog[]>([]);
   const [exercises, setExercises] = useState<ExerciseDefinition[]>([]);
   const [bodyWeights, setBodyWeights] = useState<BodyWeightEntry[]>([]);
-  const [settings, setSettingsState] = useState<AppSettings>({ poolLengthDefault: 25 });
+  const [settings, setSettingsState] = useState<AppSettings>({
+    poolLengthDefault: 25,
+    targetDaysWeekly: 4,
+    targetSwimMetersWeekly: 2000,
+    restTimerDefaultSeconds: 90
+  });
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [externalReloadToken, setExternalReloadToken] = useState<number>(0);
 
-  const refreshData = useCallback(async () => {
+  const refreshData = useCallback(async (bumpExternalToken = false) => {
     try {
       const [fetchedLogs, fetchedExercises, fetchedWeights, fetchedSettings] = await Promise.all([
         getAllLogs(),
@@ -66,7 +73,15 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setLogs(fetchedLogs);
       setExercises(fetchedExercises);
       setBodyWeights(fetchedWeights);
-      setSettingsState(fetchedSettings);
+      setSettingsState({
+        targetDaysWeekly: 4,
+        targetSwimMetersWeekly: 2000,
+        restTimerDefaultSeconds: 90,
+        ...fetchedSettings
+      });
+      if (bumpExternalToken) {
+        setExternalReloadToken(t => t + 1);
+      }
     } catch (err) {
       console.error('Error cargando datos de IndexedDB:', err);
     } finally {
@@ -75,7 +90,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, []);
 
   useEffect(() => {
-    refreshData();
+    refreshData(true);
   }, [refreshData]);
 
   const logsMap = React.useMemo(() => {
@@ -90,27 +105,27 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const saveCurrentLog = async (log: DailyWorkoutLog) => {
     await saveLog(log);
-    await refreshData();
+    await refreshData(false);
   };
 
   const deleteCurrentLog = async (date: string) => {
     await deleteLog(date);
-    await refreshData();
+    await refreshData(false);
   };
 
   const saveExerciseDef = async (ex: ExerciseDefinition) => {
     await saveExercise(ex);
-    await refreshData();
+    await refreshData(false);
   };
 
   const saveWeightRecord = async (entry: BodyWeightEntry) => {
     await saveBodyWeight(entry);
-    await refreshData();
+    await refreshData(false);
   };
 
   const deleteWeightRecord = async (date: string) => {
     await deleteBodyWeight(date);
-    await refreshData();
+    await refreshData(false);
   };
 
   const updateSettings = async (newSettings: AppSettings) => {
@@ -121,13 +136,13 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const loadDemoAndRefresh = async () => {
     setIsLoading(true);
     await seedDemoData();
-    await refreshData();
+    await refreshData(true);
   };
 
   const clearDataAndRefresh = async () => {
     setIsLoading(true);
     await clearAllData();
-    await refreshData();
+    await refreshData(true);
   };
 
   return (
@@ -141,6 +156,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         bodyWeights,
         settings,
         isLoading,
+        externalReloadToken,
         activeLog,
         saveCurrentLog,
         deleteCurrentLog,

@@ -1,5 +1,5 @@
 // src/components/settings/SettingsView.tsx
-// Ajustes generales: Registro mensual de peso, gestión del catálogo de ejercicios, backup JSON y guía móvil
+// Ajustes generales: Perfil y metas semanales, peso corporal, catálogo completo de ejercicios, backup JSON y guía móvil
 
 import React, { useState } from 'react';
 import {
@@ -10,7 +10,10 @@ import {
   Upload,
   Database,
   Smartphone,
-  Edit2
+  Edit2,
+  Target,
+  Archive,
+  RotateCcw
 } from 'lucide-react';
 import { useAppData } from '../../db/useAppData';
 import { ExerciseDefinition, ExerciseCategory, BodyWeightEntry } from '../../types/models';
@@ -42,10 +45,15 @@ export const SettingsView: React.FC = () => {
   const [newExName, setNewExName] = useState<string>('');
   const [newExCat, setNewExCat] = useState<ExerciseCategory>('calisthenics');
   const [newExMuscle, setNewExMuscle] = useState<string>('');
+  const [newExExternalWeight, setNewExExternalWeight] = useState<boolean>(false);
 
-  // Estado para renombrar ejercicio
+  // Estado para editar ejercicio
   const [editingExId, setEditingExId] = useState<string | null>(null);
   const [editingExName, setEditingExName] = useState<string>('');
+  const [editingExMuscle, setEditingExMuscle] = useState<string>('');
+
+  // Confirmación en dos toques para vaciar datos
+  const [confirmClearData, setConfirmClearData] = useState<boolean>(false);
 
   // Estado de mensajes
   const [statusMessage, setStatusMessage] = useState<{ text: string; error?: boolean } | null>(null);
@@ -87,26 +95,36 @@ export const SettingsView: React.FC = () => {
       name: newExName.trim(),
       category: newExCat,
       muscleGroup: newExMuscle.trim() || (newExCat === 'weights' ? 'Brazos / Torso' : 'Cuerpo Completo'),
-      usesExternalWeight: newExCat === 'weights',
+      usesExternalWeight: newExCat === 'weights' ? true : newExExternalWeight,
       difficultyFactor: 1.0,
       order: exercises.length + 1
     };
     await saveExerciseDef(newEx);
     setNewExName('');
     setNewExMuscle('');
+    setNewExExternalWeight(false);
     setShowNewExModal(false);
     showStatus(`Ejercicio "${newEx.name}" añadido al catálogo ✓`);
   };
 
-  // Guardar renombrado
-  const handleRenameExercise = async (ex: ExerciseDefinition) => {
+  // Guardar edición de ejercicio
+  const handleSaveExerciseEdit = async (ex: ExerciseDefinition) => {
     if (!editingExName.trim()) return;
     await saveExerciseDef({
       ...ex,
-      name: editingExName.trim()
+      name: editingExName.trim(),
+      muscleGroup: editingExMuscle.trim() || ex.muscleGroup
     });
     setEditingExId(null);
-    showStatus('Ejercicio renombrado ✓');
+    showStatus('Ejercicio actualizado ✓');
+  };
+
+  const handleToggleArchiveExercise = async (ex: ExerciseDefinition) => {
+    await saveExerciseDef({
+      ...ex,
+      archived: !ex.archived
+    });
+    showStatus(ex.archived ? `"${ex.name}" restaurado ✓` : `"${ex.name}" archivado (su historial se mantiene)`);
   };
 
   // Exportar JSON
@@ -116,7 +134,6 @@ export const SettingsView: React.FC = () => {
       const blob = new Blob([json], { type: 'application/json' });
       const filename = `entrenamientos-backup-${toLocalDateKey(new Date())}.json`;
 
-      // Intentar compartir con Web Share API si es móvil
       if (navigator.canShare && navigator.canShare({ files: [new File([blob], filename, { type: 'application/json' })] })) {
         const file = new File([blob], filename, { type: 'application/json' });
         await navigator.share({
@@ -128,7 +145,6 @@ export const SettingsView: React.FC = () => {
         return;
       }
 
-      // Descarga directa habitual
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -138,7 +154,7 @@ export const SettingsView: React.FC = () => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       showStatus('Archivo de copia guardado en Descargas ✓');
-    } catch (err) {
+    } catch {
       showStatus('Error al exportar los datos', true);
     }
   };
@@ -153,14 +169,25 @@ export const SettingsView: React.FC = () => {
       const content = event.target?.result as string;
       const res = await importDataFromJson(content);
       if (res.success) {
-        await refreshData();
+        await refreshData(true);
         showStatus(res.message);
       } else {
         showStatus(res.message, true);
       }
     };
     reader.readAsText(file);
-    e.target.value = ''; // Reset input
+    e.target.value = '';
+  };
+
+  const handleClearAllClick = async () => {
+    if (!confirmClearData) {
+      setConfirmClearData(true);
+      setTimeout(() => setConfirmClearData(false), 4000);
+      return;
+    }
+    setConfirmClearData(false);
+    await clearDataAndRefresh();
+    showStatus('Datos vaciados correctamente');
   };
 
   return (
@@ -170,23 +197,118 @@ export const SettingsView: React.FC = () => {
         <div
           style={{
             position: 'sticky',
-            top: '70px',
+            top: '64px',
             zIndex: 60,
             background: statusMessage.error ? '#f43f5e' : '#10b981',
             color: '#fff',
-            padding: '10px 16px',
+            padding: '10px 14px',
             borderRadius: '12px',
             fontWeight: 700,
-            fontSize: '0.85rem',
+            fontSize: '0.84rem',
             textAlign: 'center',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.3)'
+            boxShadow: '0 4px 16px rgba(0,0,0,0.35)'
           }}
         >
           {statusMessage.text}
         </div>
       )}
 
-      {/* 1. SECCIÓN PESO CORPORAL (1 VEZ AL MES) */}
+      {/* 1. PERFIL, METAS SEMANALES Y PISCINA */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">
+            <Target size={19} color="#06b6d4" />
+            <span>Perfil y Objetivos</span>
+          </div>
+        </div>
+
+        <div className="input-group">
+          <label className="input-label">Tu nombre (opcional)</label>
+          <input
+            type="text"
+            placeholder="Ej. Miguel"
+            value={settings.userName || ''}
+            onChange={e => updateSettings({ ...settings, userName: e.target.value })}
+            className="input-field"
+          />
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px' }}>
+          <div className="input-group">
+            <label className="input-label">Meta Días / Sem</label>
+            <input
+              type="number"
+              inputMode="numeric"
+              min="1"
+              max="7"
+              value={settings.targetDaysWeekly ?? 4}
+              onChange={e =>
+                updateSettings({
+                  ...settings,
+                  targetDaysWeekly: Math.max(1, Math.min(7, parseInt(e.target.value, 10) || 1))
+                })
+              }
+              className="input-field"
+            />
+          </div>
+
+          <div className="input-group">
+            <label className="input-label">Meta Piscina / Sem (m)</label>
+            <input
+              type="number"
+              inputMode="numeric"
+              step="100"
+              min="100"
+              value={settings.targetSwimMetersWeekly ?? 2000}
+              onChange={e =>
+                updateSettings({
+                  ...settings,
+                  targetSwimMetersWeekly: Math.max(100, parseInt(e.target.value, 10) || 500)
+                })
+              }
+              className="input-field"
+            />
+          </div>
+        </div>
+
+        <div className="input-group">
+          <label className="input-label">Piscina por Defecto</label>
+          <div className="tab-pills">
+            <button
+              type="button"
+              className={`tab-pill ${settings.poolLengthDefault === 25 ? 'active' : ''}`}
+              onClick={() => updateSettings({ ...settings, poolLengthDefault: 25 })}
+            >
+              Piscina Corta (25m)
+            </button>
+            <button
+              type="button"
+              className={`tab-pill ${settings.poolLengthDefault === 50 ? 'active' : ''}`}
+              onClick={() => updateSettings({ ...settings, poolLengthDefault: 50 })}
+            >
+              Olímpica (50m)
+            </button>
+          </div>
+        </div>
+
+        <div className="input-group">
+          <label className="input-label">Descanso por defecto en fuerza</label>
+          <div className="tab-pills">
+            {[60, 90, 120, 180].map(sec => (
+              <button
+                key={sec}
+                type="button"
+                className={`tab-pill ${(settings.restTimerDefaultSeconds || 90) === sec ? 'active' : ''}`}
+                onClick={() => updateSettings({ ...settings, restTimerDefaultSeconds: sec })}
+              >
+                {sec < 120 ? `${sec}s` : `${sec / 60}m`}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* 2. SECCIÓN PESO CORPORAL (MENSUAL) */}
       <div className="card">
         <div className="card-header">
           <div className="card-title">
@@ -195,36 +317,37 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
         <p style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
-          Anótalo una vez al mes si quieres tener la curva de peso y la estimación de fuerza relativa en dominadas.
+          Anótalo una vez al mes para seguir tu curva de peso y fuerza relativa en dominadas.
         </p>
 
         <form onSubmit={handleSaveWeight} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: '8px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
             <input
               type="date"
               value={newBwDate}
               onChange={e => setNewBwDate(e.target.value)}
               className="input-field"
-              style={{ fontSize: '0.85rem' }}
+              style={{ fontSize: '0.86rem' }}
             />
             <input
               type="number"
+              inputMode="decimal"
               step="0.1"
-              placeholder="Peso en kg (ej. 75.5)"
+              placeholder="Peso kg (ej. 75.5)"
               value={newBwKg}
               onChange={e => setNewBwKg(e.target.value)}
               className="input-field"
             />
           </div>
 
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <input
               type="text"
               placeholder="Nota opcional (ej. Pesaje mensual)"
               value={newBwNotes}
               onChange={e => setNewBwNotes(e.target.value)}
               className="input-field"
-              style={{ flex: 1, fontSize: '0.85rem' }}
+              style={{ flex: '1 1 160px', fontSize: '0.85rem' }}
             />
             <button type="submit" className="btn btn-primary btn-sm" style={{ padding: '0 16px' }}>
               <Plus size={16} />
@@ -235,7 +358,7 @@ export const SettingsView: React.FC = () => {
 
         {/* Historial de pesajes */}
         {bodyWeights.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
             <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' }}>
               Historial de Pesajes
             </div>
@@ -245,30 +368,39 @@ export const SettingsView: React.FC = () => {
                 style={{
                   background: 'var(--bg-subtle)',
                   borderRadius: '8px',
-                  padding: '8px 12px',
+                  padding: '8px 10px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
+                  gap: '8px',
                   border: '1px solid var(--border-color)'
                 }}
               >
-                <div>
-                  <span style={{ fontWeight: 800, fontSize: '0.95rem', color: '#d8b4fe' }}>
-                    {formatWeightKg(bw.weightKg)}
-                  </span>
-                  <span style={{ fontSize: '0.75rem', color: '#94a3b8', marginLeft: '8px' }}>
-                    {formatFriendlyDate(bw.date)} ({bw.date})
-                  </span>
-                  {bw.notes && <span style={{ fontSize: '0.75rem', color: '#64748b', marginLeft: '6px' }}>· {bw.notes}</span>}
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 800, fontSize: '0.94rem', color: '#d8b4fe' }}>
+                      {formatWeightKg(bw.weightKg)}
+                    </span>
+                    <span style={{ fontSize: '0.74rem', color: '#94a3b8' }}>
+                      {formatFriendlyDate(bw.date)} ({bw.date})
+                    </span>
+                  </div>
+                  {bw.notes && (
+                    <div style={{ fontSize: '0.74rem', color: '#64748b', marginTop: '2px' }}>
+                      {bw.notes}
+                    </div>
+                  )}
                 </div>
 
                 <button
+                  type="button"
                   className="btn btn-ghost btn-icon"
-                  style={{ width: 30, height: 30, minHeight: 30 }}
+                  style={{ width: 32, height: 32, minHeight: 32 }}
                   onClick={() => deleteWeightRecord(bw.date)}
                   title="Eliminar pesaje"
+                  aria-label={`Eliminar pesaje ${bw.date}`}
                 >
-                  <Trash2 size={13} color="#f43f5e" />
+                  <Trash2 size={14} color="#f43f5e" />
                 </button>
               </div>
             ))}
@@ -276,13 +408,14 @@ export const SettingsView: React.FC = () => {
         )}
       </div>
 
-      {/* 2. CATÁLOGO DE EJERCICIOS */}
+      {/* 3. CATÁLOGO DE EJERCICIOS */}
       <div className="card">
         <div className="card-header">
           <div className="card-title">
             <span>Catálogo de Ejercicios</span>
           </div>
           <button
+            type="button"
             className="btn btn-secondary btn-sm"
             onClick={() => setShowNewExModal(!showNewExModal)}
           >
@@ -342,6 +475,18 @@ export const SettingsView: React.FC = () => {
               className="input-field"
             />
 
+            {newExCat === 'calisthenics' && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: '#cbd5e1', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={newExExternalWeight}
+                  onChange={e => setNewExExternalWeight(e.target.checked)}
+                  style={{ accentColor: '#06b6d4', width: 16, height: 16 }}
+                />
+                <span>Habitualmente con lastre / peso extra</span>
+              </label>
+            )}
+
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               <button
                 type="button"
@@ -357,7 +502,7 @@ export const SettingsView: React.FC = () => {
           </form>
         )}
 
-        {/* Lista de ejercicios con opción de renombrar */}
+        {/* Lista de ejercicios con edición y archivo */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
           {exercises.map(ex => {
             const isEditing = editingExId === ex.id;
@@ -369,86 +514,95 @@ export const SettingsView: React.FC = () => {
                 style={{
                   background: 'var(--bg-subtle)',
                   borderRadius: '10px',
-                  padding: '8px 12px',
+                  padding: '8px 10px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  border: '1px solid var(--border-color)'
+                  gap: '8px',
+                  border: '1px solid var(--border-color)',
+                  opacity: ex.archived ? 0.55 : 1
                 }}
               >
                 {isEditing ? (
-                  <div style={{ display: 'flex', gap: '6px', flex: 1, alignItems: 'center' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minWidth: 0 }}>
                     <input
                       type="text"
                       value={editingExName}
                       onChange={e => setEditingExName(e.target.value)}
                       className="input-field"
-                      style={{ minHeight: '34px', padding: '4px 8px', fontSize: '0.85rem', flex: 1 }}
+                      style={{ minHeight: '36px', padding: '4px 8px', fontSize: '0.86rem' }}
+                      placeholder="Nombre"
                       autoFocus
                     />
-                    <button
-                      className="btn btn-primary btn-sm"
-                      style={{ minHeight: '34px' }}
-                      onClick={() => handleRenameExercise(ex)}
-                    >
-                      OK
-                    </button>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      style={{ minHeight: '34px' }}
-                      onClick={() => setEditingExId(null)}
-                    >
-                      ✕
-                    </button>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <input
+                        type="text"
+                        value={editingExMuscle}
+                        onChange={e => setEditingExMuscle(e.target.value)}
+                        className="input-field"
+                        style={{ minHeight: '34px', padding: '4px 8px', fontSize: '0.8rem', flex: 1 }}
+                        placeholder="Grupo muscular"
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        style={{ minHeight: '34px' }}
+                        onClick={() => handleSaveExerciseEdit(ex)}
+                      >
+                        OK
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        style={{ minHeight: '34px' }}
+                        onClick={() => setEditingExId(null)}
+                      >
+                        ✕
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: '0.9rem', color: isWeight ? '#f59e0b' : '#34d399' }}>
-                        {ex.name}
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.88rem', color: isWeight ? '#f59e0b' : '#34d399' }}>
+                        {ex.name} {ex.archived && <span style={{ color: '#94a3b8', fontSize: '0.72rem' }}>(Archivado)</span>}
                       </div>
                       <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
                         {isWeight ? 'Pesas (kg)' : 'Calistenia'} · {ex.muscleGroup}
                       </div>
                     </div>
 
-                    <button
-                      className="btn btn-ghost btn-icon"
-                      style={{ width: 32, height: 32, minHeight: 32 }}
-                      onClick={() => {
-                        setEditingExId(ex.id);
-                        setEditingExName(ex.name);
-                      }}
-                      title="Renombrar ejercicio"
-                    >
-                      <Edit2 size={14} color="#94a3b8" />
-                    </button>
+                    <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-icon"
+                        style={{ width: 32, height: 32, minHeight: 32 }}
+                        onClick={() => {
+                          setEditingExId(ex.id);
+                          setEditingExName(ex.name);
+                          setEditingExMuscle(ex.muscleGroup);
+                        }}
+                        title="Editar ejercicio"
+                        aria-label={`Editar ${ex.name}`}
+                      >
+                        <Edit2 size={14} color="#94a3b8" />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-icon"
+                        style={{ width: 32, height: 32, minHeight: 32 }}
+                        onClick={() => handleToggleArchiveExercise(ex)}
+                        title={ex.archived ? 'Restaurar ejercicio' : 'Ocultar del registro'}
+                        aria-label={ex.archived ? `Restaurar ${ex.name}` : `Archivar ${ex.name}`}
+                      >
+                        {ex.archived ? <RotateCcw size={14} color="#34d399" /> : <Archive size={14} color="#64748b" />}
+                      </button>
+                    </div>
                   </>
                 )}
               </div>
             );
           })}
-        </div>
-      </div>
-
-      {/* 3. PREFERENCIAS DE PISCINA */}
-      <div className="card">
-        <div className="card-header">
-          <div className="card-title">Piscina por Defecto</div>
-        </div>
-        <div className="tab-pills">
-          <button
-            className={`tab-pill ${settings.poolLengthDefault === 25 ? 'active' : ''}`}
-            onClick={() => updateSettings({ ...settings, poolLengthDefault: 25 })}
-          >
-            Piscina Corta (25m)
-          </button>
-          <button
-            className={`tab-pill ${settings.poolLengthDefault === 50 ? 'active' : ''}`}
-            onClick={() => updateSettings({ ...settings, poolLengthDefault: 50 })}
-          >
-            Piscina Olímpica (50m)
-          </button>
         </div>
       </div>
 
@@ -461,18 +615,18 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
         <p style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
-          Tus datos se guardan exclusivamente en la memoria local de tu teléfono. Haz una copia de seguridad en JSON de vez en cuando para guardarla en tus archivos o transferirla a otro móvil.
+          Tus datos se guardan exclusivamente en la memoria local de tu teléfono. Exporta una copia JSON periódicamente para conservar tu historial.
         </p>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
-          <button className="btn btn-primary" onClick={handleExportJson}>
-            <Download size={16} />
-            <span>Exportar Copia</span>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
+          <button type="button" className="btn btn-primary btn-sm" style={{ minHeight: '42px' }} onClick={handleExportJson}>
+            <Download size={15} />
+            <span>Exportar</span>
           </button>
 
-          <label className="btn btn-secondary" style={{ cursor: 'pointer', textAlign: 'center' }}>
-            <Upload size={16} />
-            <span>Restaurar Copia</span>
+          <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', minHeight: '42px' }}>
+            <Upload size={15} />
+            <span>Restaurar</span>
             <input
               type="file"
               accept=".json"
@@ -488,36 +642,33 @@ export const SettingsView: React.FC = () => {
         <div className="card-header">
           <div className="card-title">
             <Smartphone size={18} color="#f59e0b" />
-            <span>Datos de Prueba y Verificación</span>
+            <span>Datos de Prueba y Gestión</span>
           </div>
         </div>
         <p style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
-          Puedes rellenar la app con 90 días de entrenamientos realistas (natación, calistenia, pesas y 3 pesajes mensuales) para ver todas las gráficas y el motor matemático en acción al instante.
+          Carga 90 días de entrenamientos realistas (natación, calistenia, pesas y pesajes) para probar todas las gráficas y proyecciones.
         </p>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button
+            type="button"
             className="btn btn-secondary btn-sm"
-            style={{ flex: 1, borderColor: '#f59e0b', color: '#f59e0b' }}
+            style={{ flex: '1 1 160px', borderColor: '#f59e0b', color: '#f59e0b', minHeight: '40px' }}
             onClick={async () => {
               await loadDemoAndRefresh();
-              showStatus('¡90 días de datos de ejemplo cargados con éxito! Revisa la pestaña Gráficas y Avance ✓');
+              showStatus('¡90 días de ejemplo cargados! Revisa Gráficas y Avance ✓');
             }}
           >
-            Cargar 90 días de demo
+            Cargar 90 días demo
           </button>
 
           <button
-            className="btn btn-ghost btn-sm"
-            style={{ color: '#f43f5e' }}
-            onClick={async () => {
-              if (window.confirm('¿Seguro que quieres borrar todos los entrenamientos y pesajes?')) {
-                await clearDataAndRefresh();
-                showStatus('Datos vaciados correctamente');
-              }
-            }}
+            type="button"
+            className={`btn btn-sm ${confirmClearData ? 'btn-danger-soft' : 'btn-ghost'}`}
+            style={{ flex: '1 1 120px', color: '#fb7185', minHeight: '40px' }}
+            onClick={handleClearAllClick}
           >
-            Vaciar datos
+            {confirmClearData ? 'Pulsa de nuevo para borrar' : 'Vaciar datos'}
           </button>
         </div>
       </div>
@@ -532,10 +683,10 @@ export const SettingsView: React.FC = () => {
             <strong>En Android (Chrome):</strong> Pulsa en los tres puntos ⋮ arriba a la derecha y selecciona <strong>"Instalar aplicación"</strong> o <strong>"Añadir a pantalla de inicio"</strong>.
           </div>
           <div>
-            <strong>En iPhone (Safari):</strong> Pulsa el botón de <strong>Compartir</strong> (icono de cuadrado con flecha hacia arriba) y selecciona <strong>"Añadir a pantalla de inicio"</strong>.
+            <strong>En iPhone (Safari):</strong> Pulsa el botón de <strong>Compartir</strong> y selecciona <strong>"Añadir a pantalla de inicio"</strong>.
           </div>
           <div style={{ color: '#34d399', fontSize: '0.75rem', fontWeight: 600 }}>
-            ✓ Una vez instalada, funcionará siempre aunque pongas el teléfono en Modo Avión sin conexión.
+            ✓ Funciona al 100% incluso con el móvil en Modo Avión.
           </div>
         </div>
       </div>

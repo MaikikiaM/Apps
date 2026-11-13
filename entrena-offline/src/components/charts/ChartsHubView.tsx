@@ -1,5 +1,5 @@
 // src/components/charts/ChartsHubView.tsx
-// Centro unificado de analíticas gráficas con filtro de rango y pestañas
+// Centro unificado de analíticas gráficas con filtro de rango y pestañas responsivas
 
 import React, { useState, useMemo } from 'react';
 import { Waves, Dumbbell, Weight, Sparkles } from 'lucide-react';
@@ -19,7 +19,6 @@ export const ChartsHubView: React.FC = () => {
   const [timeRange, setTimeRange] = useState<TimeRange>('3M');
   const [showProjection, setShowProjection] = useState<boolean>(true);
 
-  // Filtrar logs según el rango de tiempo seleccionado
   const filteredLogs = useMemo(() => {
     if (timeRange === 'ALL') return logs;
     const todayKey = toLocalDateKey(new Date());
@@ -37,7 +36,7 @@ export const ChartsHubView: React.FC = () => {
     <div className="main-content">
       {/* Selector de Rango de Tiempo y Switch de Proyección */}
       <div className="card" style={{ padding: '10px 14px', gap: '10px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
           <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' }}>
             Periodo
           </span>
@@ -59,6 +58,7 @@ export const ChartsHubView: React.FC = () => {
           {(['1M', '3M', '6M', '1A', 'ALL'] as TimeRange[]).map(r => (
             <button
               key={r}
+              type="button"
               className={`tab-pill ${timeRange === r ? 'active' : ''}`}
               onClick={() => setTimeRange(r)}
             >
@@ -68,41 +68,41 @@ export const ChartsHubView: React.FC = () => {
         </div>
       </div>
 
-      {/* Sub-pestañas de Categoría */}
-      <div className="tab-pills" style={{ background: 'var(--bg-card)', padding: '4px' }}>
+      {/* Sub-pestañas de Categoría (4 columnas compactas para móvil) */}
+      <div className="charts-category-tabs">
         <button
-          className={`tab-pill ${activeTab === 'swim' ? 'active' : ''}`}
+          type="button"
+          className={`charts-category-tab ${activeTab === 'swim' ? 'active' : ''}`}
           onClick={() => setActiveTab('swim')}
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
         >
-          <Waves size={15} color="#06b6d4" />
+          <Waves size={16} color="#06b6d4" />
           <span>Natación</span>
         </button>
 
         <button
-          className={`tab-pill ${activeTab === 'calisthenics' ? 'active' : ''}`}
+          type="button"
+          className={`charts-category-tab ${activeTab === 'calisthenics' ? 'active' : ''}`}
           onClick={() => setActiveTab('calisthenics')}
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
         >
-          <Dumbbell size={15} color="#10b981" />
+          <Dumbbell size={16} color="#10b981" />
           <span>Calistenia</span>
         </button>
 
         <button
-          className={`tab-pill ${activeTab === 'weights' ? 'active' : ''}`}
+          type="button"
+          className={`charts-category-tab ${activeTab === 'weights' ? 'active' : ''}`}
           onClick={() => setActiveTab('weights')}
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
         >
-          <Dumbbell size={15} color="#f59e0b" />
+          <Dumbbell size={16} color="#f59e0b" />
           <span>Pesas</span>
         </button>
 
         <button
-          className={`tab-pill ${activeTab === 'weight' ? 'active' : ''}`}
+          type="button"
+          className={`charts-category-tab ${activeTab === 'weight' ? 'active' : ''}`}
           onClick={() => setActiveTab('weight')}
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
         >
-          <Weight size={15} color="#a855f7" />
+          <Weight size={16} color="#a855f7" />
           <span>Peso</span>
         </button>
       </div>
@@ -114,6 +114,7 @@ export const ChartsHubView: React.FC = () => {
 
       {activeTab === 'calisthenics' && (
         <StrengthChartsPanel
+          key="calisthenics"
           category="calisthenics"
           exercises={exercises}
           logs={filteredLogs}
@@ -123,6 +124,7 @@ export const ChartsHubView: React.FC = () => {
 
       {activeTab === 'weights' && (
         <StrengthChartsPanel
+          key="weights"
           category="weights"
           exercises={exercises}
           logs={filteredLogs}

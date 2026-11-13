@@ -28,6 +28,11 @@ if (!fs.existsSync(apksigner)) throw new Error(`No se encontró ${apksigner}`);
 console.log('✓ Android SDK 34 detectado y listo');
 
 const androidAppDir = path.join(rootDir, 'android-app');
+const existingKeystorePath = path.join(androidAppDir, 'release.keystore');
+let savedKeystoreBuf = null;
+if (fs.existsSync(existingKeystorePath)) {
+  savedKeystoreBuf = fs.readFileSync(existingKeystorePath);
+}
 if (fs.existsSync(androidAppDir)) {
   fs.rmSync(androidAppDir, { recursive: true, force: true });
 }
@@ -48,7 +53,7 @@ fs.writeFileSync(
   path.join(valuesDir, 'strings.xml'),
   `<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">EntrenaOffline v1.1</string>
+    <string name="app_name">EntrenaOffline v1.2</string>
 </resources>`.trim()
 );
 
@@ -67,8 +72,8 @@ console.log('--- 4. Creando AndroidManifest.xml ---');
 const manifestXml = `<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.entrena.offline"
-    android:versionCode="2"
-    android:versionName="1.1">
+    android:versionCode="3"
+    android:versionName="1.2">
 
     <uses-sdk
         android:minSdkVersion="24"
@@ -283,22 +288,27 @@ const alignedApk = path.join(androidAppDir, 'aligned.apk');
 execSync(`"${zipalign}" -v -p 4 "${unalignedApk}" "${alignedApk}"`, { stdio: 'pipe' });
 console.log('✓ APK alineado a 4 bytes');
 
-// 10. Crear keystore y firmar APK con apksigner
+// 10. Reutilizar o crear keystore y firmar APK con apksigner
 console.log('--- 10. Firmando APK con apksigner ---');
 const keystorePath = path.join(androidAppDir, 'release.keystore');
-execSync(
-  `keytool -genkeypair -v -keystore "${keystorePath}" -alias entrena -keyalg RSA -keysize 2048 -validity 10000 -storepass entrena123 -keypass entrena123 -dname "CN=Entrena, OU=App, O=Offline, L=Madrid, ST=Madrid, C=ES"`,
-  { stdio: 'pipe' }
-);
+if (savedKeystoreBuf) {
+  fs.writeFileSync(keystorePath, savedKeystoreBuf);
+  console.log('✓ Reutilizado release.keystore existente para conservar la firma');
+} else {
+  execSync(
+    `keytool -genkeypair -v -keystore "${keystorePath}" -alias entrena -keyalg RSA -keysize 2048 -validity 10000 -storepass entrena123 -keypass entrena123 -dname "CN=Entrena, OU=App, O=Offline, L=Madrid, ST=Madrid, C=ES"`,
+    { stdio: 'pipe' }
+  );
+}
 
-const finalApkPath = path.join(rootDir, 'EntrenaOffline_v1.1.apk');
+const finalApkPath = path.join(rootDir, 'EntrenaOffline_v1.2.apk');
 execSync(
   `"${apksigner}" sign --ks "${keystorePath}" --ks-pass pass:entrena123 --out "${finalApkPath}" "${alignedApk}"`,
   { stdio: 'inherit' }
 );
 // Mantener también copia genérica
 fs.copyFileSync(finalApkPath, path.join(rootDir, 'EntrenaOffline.apk'));
-console.log('✓ APK firmado correctamente como EntrenaOffline_v1.1.apk');
+console.log('✓ APK firmado correctamente como EntrenaOffline_v1.2.apk');
 
 // 11. Verificar firma
 execSync(`"${apksigner}" verify --verbose "${finalApkPath}"`, { stdio: 'inherit' });

@@ -73,6 +73,21 @@ export function getDateRangeSequence(startKey: string, endKey: string): string[]
   return result;
 }
 
+// Devuelve los 7 días (Lunes a Domingo) de la semana que contiene a referenceKey
+export function getWeekDateKeys(referenceKey: string): string[] {
+  const d = parseLocalDateKey(referenceKey);
+  const weekdayIdx = (d.getDay() + 6) % 7; // 0 = Lunes, 6 = Domingo
+  const mondayKey = addDaysToDateKey(referenceKey, -weekdayIdx);
+  return Array.from({ length: 7 }, (_, i) => addDaysToDateKey(mondayKey, i));
+}
+
+// Formato corto '12 nov'
+export function formatShortSpanishDate(key: string): string {
+  const d = parseLocalDateKey(key);
+  const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  return `${d.getDate()} ${months[d.getMonth()]}`;
+}
+
 // Información para la cuadrícula del calendario mensual (lunes a domingo)
 export interface MonthCalendarCell {
   dateKey: string;

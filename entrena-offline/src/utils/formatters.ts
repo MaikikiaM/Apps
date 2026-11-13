@@ -10,11 +10,21 @@ export function formatDurationMmSs(seconds: number): string {
 
 export function formatDurationHuman(seconds: number): string {
   if (!seconds || seconds <= 0) return '0 min';
-  const mins = Math.floor(seconds / 60);
+  const totalMins = Math.floor(seconds / 60);
   const secs = Math.round(seconds % 60);
-  if (mins === 0) return `${secs}s`;
-  if (secs === 0) return `${mins} min`;
-  return `${mins} min ${secs}s`;
+  if (totalMins === 0) return `${secs}s`;
+  if (totalMins >= 60) {
+    const hrs = Math.floor(totalMins / 60);
+    const remMins = totalMins % 60;
+    return remMins > 0 ? `${hrs}h ${remMins}m` : `${hrs}h`;
+  }
+  if (secs === 0) return `${totalMins} min`;
+  return `${totalMins}m ${secs}s`;
+}
+
+export function formatMeters(meters: number): string {
+  if (!meters || meters <= 0) return '0 m';
+  return `${Math.round(meters).toLocaleString('es-ES')} m`;
 }
 
 // Ritmo de natación: '1:45 /100m'

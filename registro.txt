@@ -1202,3 +1202,25 @@ SESIÓN: 13/11/2026 - SINCRONIZACIÓN SPOTILOCAL v1.8.5-v1.8.7 AL MONORREPO APPS
   * Suite Node ('node --test tests/spotilocal.test.mjs'): 20/20 pruebas pasadas.
   * Suite Android JUnit4 ('.\gradlew.bat :app:testDebugUnitTest'): BUILD SUCCESSFUL, 8/8 pruebas pasadas (ExampleUnitTest 1/1 + NativePersistenceAndStatsTest 7/7).
 ================================================================================
+
+================================================================================
+SESIÓN: 13/11/2026 - MEJORA INTEGRAL MÓVIL Y NUEVAS FUNCIONES ENTRENA-OFFLINE v1.2
+================================================================================
+- Objetivo: Corregir desbordamientos y recortes en pantalla móvil (360px) de `entrena-offline`, corregir bugs de edición/hooks y añadir nuevas funcionalidades útiles.
+- Cambios y Soluciones Aplicadas:
+  1. Rediseño Móvil Responsivo (`theme.css`, `SwimLoggerCard.tsx`, `StrengthLoggerCard.tsx`, `ChartsHubView.tsx`, `CalendarView.tsx`, `SettingsView.tsx`, `MathProgressView.tsx`):
+     * `theme.css`: `min-width: 0` y `width: 100%` en `.input-field`, `.input-group`, `.stat-grid` (`minmax(0, 1fr)`), ocultado de spin arrows en `input[type="number"]`, `overflow-x: clip` en html/body y `user-select: text` en inputs/textareas.
+     * `SwimLoggerCard.tsx`: Corregido el recorte de "Tiempo Dedicado" separando Minutos y Segundos en cuadrícula amplia de 2 columnas (`swim-time-grid`) + chips rápidos (`15-60 min`) y el selector de piscina (`25m`/`50m`) en fila propia. Corregido el desbordamiento de metros por estilo rediseñando `StrokeRow` en 2 filas (`-25`/input/`+25` arriba + rejilla `0/+50/+100/+200` abajo), largos calculados y barra proporcional de estilos.
+     * Corregida sincronización al restar metros en `updateStroke` y corregido el bug de `DailyLoggerView.tsx` donde vaciar "Metros Totales" a 0 borraba el log y colapsaba la tarjeta mientras se escribía (mediante `externalReloadToken` en `useAppData.tsx`).
+     * Corregido crash de React Hooks en `SwimChartsPanel.tsx` (early return movido tras los `useMemo`), añadidas pestañas de 4 columnas compactas en `ChartsHubView.tsx`, KPIs en gráficas de natación/fuerza y límite `maxTicksLimit: 7` en ejes X.
+  2. Nuevas Funcionalidades (`v1.2`):
+     * `DailyLoggerView.tsx` + `RestTimerBar.tsx`: Tira semanal interactiva L-D con selector de fecha directo, barra de metas semanales, temporizador de descanso offline (60s/90s/2m/3m, +15s, Web Audio + vibración), botón "Repetir sesión anterior", "Repetir última natación", selector de sensaciones 1-5 (`feeling`) y confirmación en 2 toques sin `window.confirm`.
+     * `StrengthLoggerCard.tsx`: Referencia de la última marca del ejercicio con botón "Copiar", detección de Nuevo Récord (PR) en vivo, resumen de volumen/series y colapsado por ejercicio.
+     * `utils/stats.ts` + `TopHeader.tsx` + `CalendarView.tsx` + `MathProgressView.tsx`: Cálculo real de rachas (`currentStreakDays`, `bestStreakDays`), metas semanales, Coach Offline según TSB y Hall of Fame de Récords Personales (PRs).
+     * `SettingsView.tsx`: Configuración de nombre de usuario, metas semanales (días y metros), descanso por defecto, y edición/archivado de ejercicios del catálogo.
+     * `scripts/build-apk.mjs`: Reutilización de `release.keystore` existente y empaquetado de `EntrenaOffline_v1.2.apk` (versionCode 3).
+- Verificación:
+  * `npm.cmd test`: 12/12 pruebas Vitest pasadas (`progressionEngine.test.ts` 7 + `stats.test.ts` 5).
+  * Inspección visual y DOM en navegador a `360×800`: 0 errores de consola y 0 elementos con desbordamiento horizontal (`scrollWidth <= clientWidth`) en las 5 pestañas.
+  * `npm.cmd run build:apk`: Build Vite + APK `EntrenaOffline_v1.2.apk` (0.29 MB) generado y verificado con `apksigner` (v2/v3).
+================================================================================

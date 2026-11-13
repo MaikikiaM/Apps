@@ -2,23 +2,33 @@
 // Calendario mensual interactivo con mapa de calor y desglose detallado por día
 
 import React, { useState, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, Waves, Calendar as CalIcon, Scale, ArrowRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Waves, Calendar as CalIcon, Scale, ArrowRight, Flame, Trophy } from 'lucide-react';
 import { useAppData } from '../../db/useAppData';
 import { getMonthCalendarGrid, parseLocalDateKey, toLocalDateKey, formatFullSpanishDate } from '../../utils/dates';
-import { formatDurationHuman, formatSwimPace, formatWeightKg } from '../../utils/formatters';
+import { formatDurationHuman, formatSwimPace, formatWeightKg, formatMeters } from '../../utils/formatters';
 import { normalizeStrengthEntry } from '../../math/progressionEngine';
+import { computeStreaksAndWeeklySummary } from '../../utils/stats';
+
+const FEELING_EMOJIS: Record<number, string> = {
+  1: '😫 Agotado',
+  2: '😕 Flojo',
+  3: '😐 Normal',
+  4: '💪 Bien',
+  5: '🔥 A tope'
+};
 
 interface CalendarViewProps {
   onSelectDateToLog: (dateKey: string) => void;
 }
 
 export const CalendarView: React.FC<CalendarViewProps> = ({ onSelectDateToLog }) => {
-  const { logsMap, bodyWeights, exercises, selectedDateKey, setSelectedDateKey } = useAppData();
+  const { logs, logsMap, bodyWeights, exercises, settings, selectedDateKey, setSelectedDateKey } = useAppData();
 
   const [viewDate, setViewDate] = useState<Date>(() => parseLocalDateKey(selectedDateKey));
 
   const exMap = useMemo(() => new Map(exercises.map(e => [e.id, e])), [exercises]);
   const bodyWeightsMap = useMemo(() => new Map(bodyWeights.map(bw => [bw.date, bw])), [bodyWeights]);
+  const streakSummary = useMemo(() => computeStreaksAndWeeklySummary(logs, selectedDateKey), [logs, selectedDateKey]);
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -137,7 +147,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onSelectDateToLog })
         </button>
       </div>
 
-      {/* Resumen del Mes */}
+      {/* Resumen del Mes + Rachas */}
       <div className="stat-grid">
         <div className="stat-box">
           <span className="stat-box-label">Días Entrenados</span>
@@ -147,20 +157,38 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onSelectDateToLog })
 
         <div className="stat-box">
           <span className="stat-box-label">Natación Mes</span>
-          <span className="stat-box-value" style={{ color: '#06b6d4' }}>{monthStats.totalSwimMeters}m</span>
+          <span className="stat-box-value" style={{ color: '#06b6d4' }}>{formatMeters(monthStats.totalSwimMeters)}</span>
           <span className="stat-box-sub">{formatDurationHuman(monthStats.totalSwimDurationSeconds)}</span>
         </div>
 
         <div className="stat-box">
           <span className="stat-box-label">Reps Calistenia</span>
           <span className="stat-box-value" style={{ color: '#10b981' }}>{monthStats.totalCaliReps}</span>
-          <span className="stat-box-sub">dominadas / fondos / pica</span>
+          <span className="stat-box-sub">repeticiones totales</span>
         </div>
 
         <div className="stat-box">
           <span className="stat-box-label">Tonelaje Pesas</span>
           <span className="stat-box-value" style={{ color: '#f59e0b' }}>{monthStats.totalWeightsTonnage} kg</span>
-          <span className="stat-box-sub">bíceps y tríceps</span>
+          <span className="stat-box-sub">kg × reps acumulados</span>
+        </div>
+      </div>
+
+      {/* Rachas y Meta Semanal */}
+      <div className="card" style={{ padding: '12px 14px', gap: '8px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', fontWeight: 700, color: '#f59e0b' }}>
+            <Flame size={15} />
+            <span>Racha actual: {streakSummary.currentStreakDays} {streakSummary.currentStreakDays === 1 ? 'día' : 'días'}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.76rem', color: '#94a3b8' }}>
+            <Trophy size={13} color="#fbbf24" />
+            <span>Mejor racha: {streakSummary.bestStreakDays}d</span>
+          </div>
+        </div>
+        <div style={{ fontSize: '0.74rem', color: '#94a3b8', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+          <span>Meta semanal: {streakSummary.weeklyActiveDays}/{settings.targetDaysWeekly || 4} días</span>
+          <span>Natación sem: {formatMeters(streakSummary.weeklySwimMeters)}/{formatMeters(settings.targetSwimMetersWeekly || 2000)}</span>
         </div>
       </div>
 
@@ -297,18 +325,20 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onSelectDateToLog })
       {/* Resumen del Día Seleccionado */}
       <div className="card">
         <div className="card-header">
-          <div>
-            <div className="card-title">
-              <CalIcon size={18} color="#06b6d4" />
+          <div style={{ minWidth: 0, flex: '1 1 180px' }}>
+            <div className="card-title" style={{ flexWrap: 'wrap' }}>
+              <CalIcon size={18} color="#06b6d4" style={{ flexShrink: 0 }} />
               <span>{formatFullSpanishDate(selectedDateKey)}</span>
             </div>
             <div className="card-subtitle">
               {selectedLog ? 'Actividad registrada' : 'Sin entrenamiento registrado'}
+              {selectedLog?.feeling ? ` · ${FEELING_EMOJIS[selectedLog.feeling]}` : ''}
             </div>
           </div>
 
           <button
             className="btn btn-primary btn-sm"
+            style={{ flexShrink: 0 }}
             onClick={() => onSelectDateToLog(selectedDateKey)}
           >
             <span>{selectedLog ? 'Editar' : '+ Registrar'}</span>
@@ -328,17 +358,17 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onSelectDateToLog })
                   border: '1px solid rgba(6, 182, 212, 0.3)'
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '4px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, color: '#38bdf8' }}>
                     <Waves size={16} />
-                    <span>Natación: {selectedLog.swim.totalMeters}m</span>
+                    <span>Natación: {formatMeters(selectedLog.swim.totalMeters)}</span>
                   </div>
                   <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
                     {formatDurationHuman(selectedLog.swim.durationSeconds)} ({formatSwimPace(selectedLog.swim.totalMeters, selectedLog.swim.durationSeconds)})
                   </span>
                 </div>
-                {/* Desglose estilos */}
-                <div style={{ display: 'flex', gap: '10px', fontSize: '0.78rem', color: '#cbd5e1' }}>
+                {/* Desglose estilos con wrap seguro */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '0.78rem', color: '#cbd5e1' }}>
                   {selectedLog.swim.crawlMeters > 0 && <span>Crol: {selectedLog.swim.crawlMeters}m</span>}
                   {selectedLog.swim.backstrokeMeters > 0 && <span>Espalda: {selectedLog.swim.backstrokeMeters}m</span>}
                   {selectedLog.swim.breaststrokeMeters > 0 && <span>Braza: {selectedLog.swim.breaststrokeMeters}m</span>}

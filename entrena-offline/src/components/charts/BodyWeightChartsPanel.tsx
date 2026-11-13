@@ -23,11 +23,10 @@ export const BodyWeightChartsPanel: React.FC<BodyWeightChartsPanelProps> = ({
 
   const initialWeight = sortedBw.length > 0 ? sortedBw[0].weightKg : null;
   const currentWeight = sortedBw.length > 0 ? sortedBw[sortedBw.length - 1].weightKg : null;
-  const deltaWeight = initialWeight && currentWeight ? (currentWeight - initialWeight) : null;
+  const deltaWeight = initialWeight !== null && currentWeight !== null ? currentWeight - initialWeight : null;
 
-  // Gráfica de peso corporal continuo
   const weightChartConfig: ChartConfiguration = useMemo(() => {
-    const labels = sortedBw.map(bw => bw.date);
+    const labels = sortedBw.map(bw => bw.date.slice(2));
     const data = sortedBw.map(bw => bw.weightKg);
 
     return {
@@ -43,7 +42,7 @@ export const BodyWeightChartsPanel: React.FC<BodyWeightChartsPanelProps> = ({
             borderWidth: 2.5,
             fill: true,
             tension: 0.3,
-            pointRadius: 6,
+            pointRadius: 5,
             pointBackgroundColor: '#a855f7'
           }
         ]
@@ -51,26 +50,27 @@ export const BodyWeightChartsPanel: React.FC<BodyWeightChartsPanelProps> = ({
       options: {
         scales: {
           y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
-          x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
+          x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', maxTicksLimit: 7 } }
         }
       }
     };
   }, [sortedBw]);
 
-  // Comparativa Peso vs Rendimiento en Dominadas
-  const pullupComparisonConfig: ChartConfiguration = useMemo(() => {
-    const pullupDays: { date: string; maxReps: number }[] = [];
+  const pullupDays = useMemo(() => {
+    const list: { date: string; maxReps: number }[] = [];
     for (const l of logs) {
       const st = l.strength.find(s => s.exerciseId === 'pullups');
       if (st) {
         const stats = normalizeStrengthEntry(st);
         if (stats.maxReps > 0) {
-          pullupDays.push({ date: l.date, maxReps: stats.maxReps });
+          list.push({ date: l.date, maxReps: stats.maxReps });
         }
       }
     }
-    pullupDays.sort((a, b) => a.date.localeCompare(b.date));
+    return list.sort((a, b) => a.date.localeCompare(b.date));
+  }, [logs]);
 
+  const pullupComparisonConfig: ChartConfiguration = useMemo(() => {
     return {
       type: 'line',
       data: {
@@ -80,10 +80,11 @@ export const BodyWeightChartsPanel: React.FC<BodyWeightChartsPanelProps> = ({
             label: 'Reps Máx Dominadas',
             data: pullupDays.map(d => d.maxReps),
             borderColor: '#10b981',
-            backgroundColor: 'transparent',
+            backgroundColor: 'rgba(16, 185, 129, 0.12)',
             borderWidth: 2.5,
+            fill: true,
             tension: 0.25,
-            pointRadius: 4,
+            pointRadius: 3.5,
             pointBackgroundColor: '#10b981'
           }
         ]
@@ -91,11 +92,11 @@ export const BodyWeightChartsPanel: React.FC<BodyWeightChartsPanelProps> = ({
       options: {
         scales: {
           y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
-          x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
+          x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', maxTicksLimit: 7 } }
         }
       }
     };
-  }, [logs]);
+  }, [pullupDays]);
 
   if (sortedBw.length === 0) {
     return (
@@ -106,7 +107,7 @@ export const BodyWeightChartsPanel: React.FC<BodyWeightChartsPanelProps> = ({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
       {/* Resumen del peso */}
       <div className="stat-grid">
         <div className="stat-box">
@@ -148,7 +149,13 @@ export const BodyWeightChartsPanel: React.FC<BodyWeightChartsPanelProps> = ({
             <div className="card-subtitle">Progresión de repeticiones en peso corporal</div>
           </div>
         </div>
-        <ChartCanvas config={pullupComparisonConfig} height={210} />
+        {pullupDays.length > 0 ? (
+          <ChartCanvas config={pullupComparisonConfig} height={210} />
+        ) : (
+          <div style={{ textAlign: 'center', padding: '20px 12px', color: '#64748b', fontSize: '0.84rem' }}>
+            Sin sesiones de Dominadas en este periodo para comparar fuerza relativa.
+          </div>
+        )}
       </div>
     </div>
   );
