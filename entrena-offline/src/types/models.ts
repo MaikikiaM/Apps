@@ -103,3 +103,32 @@ export interface MetricProjection {
   confidence: number;          // R2 o calidad de ajuste (0 a 1)
   dataPointsCount: number;
 }
+
+export interface BackupPayload {
+  version: number;
+  exportedAt: string;
+  checksum?: string;
+  logs: DailyWorkoutLog[];
+  exercises: ExerciseDefinition[];
+  bodyweight: BodyWeightEntry[];
+  settings: AppSettings;
+}
+
+export interface SafetySnapshot {
+  id: string;
+  label: string;
+  createdAt: number;
+  logsCount: number;
+  bodyWeightsCount: number;
+  payloadJson: string;
+}
+
+export interface StorageHealthInfo {
+  nativeBridgeActive: boolean;
+  browserPersisted: boolean | null;
+  shadowMirrorActive: boolean;
+  lastBackupAt: number | null;
+  snapshotsCount: number;
+  totalLogs: number;
+  totalBodyWeights: number;
+}

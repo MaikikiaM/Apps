@@ -1,5 +1,5 @@
 // src/components/settings/SettingsView.tsx
-// Ajustes generales: Perfil y metas semanales, peso corporal, catálogo completo de ejercicios, backup JSON y guía móvil
+// Ajustes generales: Perfil y metas, peso corporal, catálogo, centro de seguridad/respaldo y guía móvil
 
 import React, { useState } from 'react';
 import {
@@ -8,21 +8,24 @@ import {
   Trash2,
   Download,
   Upload,
-  Database,
   Smartphone,
   Edit2,
   Target,
   Archive,
-  RotateCcw
+  RotateCcw,
+  ShieldCheck,
+  History,
+  BookmarkPlus
 } from 'lucide-react';
 import { useAppData } from '../../db/useAppData';
-import { ExerciseDefinition, ExerciseCategory, BodyWeightEntry } from '../../types/models';
+import { ExerciseDefinition, ExerciseCategory, BodyWeightEntry, SafetySnapshot } from '../../types/models';
 import { toLocalDateKey, formatFriendlyDate } from '../../utils/dates';
-import { exportDataAsJson, importDataFromJson } from '../../db/database';
+import { exportDataAsJson, exportBackupToDeviceDownloads, importDataFromJson } from '../../db/database';
 import { formatWeightKg } from '../../utils/formatters';
 
 export const SettingsView: React.FC = () => {
   const {
+    logs,
     bodyWeights,
     saveWeightRecord,
     deleteWeightRecord,
@@ -32,6 +35,10 @@ export const SettingsView: React.FC = () => {
     updateSettings,
     loadDemoAndRefresh,
     clearDataAndRefresh,
+    storageHealth,
+    safetySnapshots,
+    createManualSnapshot,
+    restoreFromSnapshot,
     refreshData
   } = useAppData();
 
@@ -52,15 +59,18 @@ export const SettingsView: React.FC = () => {
   const [editingExName, setEditingExName] = useState<string>('');
   const [editingExMuscle, setEditingExMuscle] = useState<string>('');
 
-  // Confirmación en dos toques para vaciar datos
+  // Seguridad / Backup / Confirmaciones en dos toques
+  const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
   const [confirmClearData, setConfirmClearData] = useState<boolean>(false);
+  const [confirmDemoLoad, setConfirmDemoLoad] = useState<boolean>(false);
+  const [confirmRestoreSnapId, setConfirmRestoreSnapId] = useState<string | null>(null);
 
   // Estado de mensajes
   const [statusMessage, setStatusMessage] = useState<{ text: string; error?: boolean } | null>(null);
 
   const showStatus = (text: string, error = false) => {
     setStatusMessage({ text, error });
-    setTimeout(() => setStatusMessage(null), 3500);
+    setTimeout(() => setStatusMessage(null), 4000);
   };
 
   // Guardar peso corporal mensual
@@ -79,7 +89,7 @@ export const SettingsView: React.FC = () => {
     await saveWeightRecord(entry);
     setNewBwKg('');
     setNewBwNotes('');
-    showStatus('Peso corporal guardado correctamente ✓');
+    showStatus('Peso corporal guardado y respaldado ✓');
   };
 
   // Guardar nuevo ejercicio
@@ -127,12 +137,20 @@ export const SettingsView: React.FC = () => {
     showStatus(ex.archived ? `"${ex.name}" restaurado ✓` : `"${ex.name}" archivado (su historial se mantiene)`);
   };
 
-  // Exportar JSON
+  // Exportar JSON (nativo Android Downloads o Web Share / Descarga)
   const handleExportJson = async () => {
     try {
+      const filename = `entrenamientos-backup-${toLocalDateKey(new Date())}.json`;
+
+      // Si estamos en APK Android nativo, guardar directo en Descargas/EntrenaOffline/
+      const nativePath = await exportBackupToDeviceDownloads(filename);
+      if (nativePath) {
+        showStatus(`Copia guardada en ${nativePath} ✓`);
+        return;
+      }
+
       const json = await exportDataAsJson();
       const blob = new Blob([json], { type: 'application/json' });
-      const filename = `entrenamientos-backup-${toLocalDateKey(new Date())}.json`;
 
       if (navigator.canShare && navigator.canShare({ files: [new File([blob], filename, { type: 'application/json' })] })) {
         const file = new File([blob], filename, { type: 'application/json' });
@@ -159,7 +177,7 @@ export const SettingsView: React.FC = () => {
     }
   };
 
-  // Importar JSON
+  // Importar JSON (soporta fusionar sin perder datos o reemplazar con respaldo previo)
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -167,7 +185,7 @@ export const SettingsView: React.FC = () => {
     const reader = new FileReader();
     reader.onload = async (event) => {
       const content = event.target?.result as string;
-      const res = await importDataFromJson(content);
+      const res = await importDataFromJson(content, importMode);
       if (res.success) {
         await refreshData(true);
         showStatus(res.message);
@@ -179,16 +197,54 @@ export const SettingsView: React.FC = () => {
     e.target.value = '';
   };
 
+  const handleCreateManualSnapshot = async () => {
+    const ok = await createManualSnapshot(`Manual (${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })})`);
+    if (ok) {
+      showStatus('Punto de restauración guardado ✓');
+    }
+  };
+
+  const handleRestoreSnapshot = async (snap: SafetySnapshot) => {
+    if (confirmRestoreSnapId !== snap.id) {
+      setConfirmRestoreSnapId(snap.id);
+      setTimeout(() => setConfirmRestoreSnapId(null), 4000);
+      return;
+    }
+    setConfirmRestoreSnapId(null);
+    const res = await restoreFromSnapshot(snap);
+    showStatus(res.message, !res.success);
+  };
+
+  const handleDemoClick = async () => {
+    if (logs.length > 0 && !confirmDemoLoad) {
+      setConfirmDemoLoad(true);
+      setTimeout(() => setConfirmDemoLoad(false), 4500);
+      return;
+    }
+    setConfirmDemoLoad(false);
+    await loadDemoAndRefresh();
+    showStatus('¡90 días de ejemplo cargados! Tu estado previo quedó en Puntos de Restauración ✓');
+  };
+
   const handleClearAllClick = async () => {
     if (!confirmClearData) {
       setConfirmClearData(true);
-      setTimeout(() => setConfirmClearData(false), 4000);
+      setTimeout(() => setConfirmClearData(false), 4500);
       return;
     }
     setConfirmClearData(false);
     await clearDataAndRefresh();
-    showStatus('Datos vaciados correctamente');
+    showStatus('Datos vaciados (se guardó copia de seguridad previa en Puntos de Restauración)');
   };
+
+  const lastBackupText = storageHealth?.lastBackupAt
+    ? new Date(storageHealth.lastBackupAt).toLocaleString('es-ES', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    : 'Pendiente';
 
   return (
     <div className="main-content">
@@ -213,7 +269,167 @@ export const SettingsView: React.FC = () => {
         </div>
       )}
 
-      {/* 1. PERFIL, METAS SEMANALES Y PISCINA */}
+      {/* 1. CENTRO DE BLINDAJE Y COPIA DE SEGURIDAD */}
+      <div className="card" style={{ borderColor: 'rgba(16, 185, 129, 0.4)' }}>
+        <div className="card-header">
+          <div className="card-title">
+            <ShieldCheck size={20} color="#10b981" />
+            <span>Blindaje y Copias de Seguridad</span>
+          </div>
+          <span
+            style={{
+              fontSize: '0.7rem',
+              fontWeight: 700,
+              color: '#34d399',
+              background: 'rgba(16, 185, 129, 0.14)',
+              padding: '2px 8px',
+              borderRadius: '9999px'
+            }}
+          >
+            Multi-capa
+          </span>
+        </div>
+
+        {/* Estado en vivo de las capas de seguridad */}
+        <div className="stat-grid">
+          <div className="stat-box">
+            <span className="stat-box-label">Base Local + Espejo</span>
+            <span className="stat-box-value" style={{ fontSize: '0.96rem', color: '#34d399' }}>
+              {storageHealth?.totalLogs ?? logs.length} días · {storageHealth?.shadowMirrorActive ? 'Espejo OK' : 'Listo'}
+            </span>
+            <span className="stat-box-sub">Último respaldo: {lastBackupText}</span>
+          </div>
+
+          <div className="stat-box">
+            <span className="stat-box-label">Respaldo Dispositivo</span>
+            <span className="stat-box-value" style={{ fontSize: '0.96rem', color: storageHealth?.nativeBridgeActive ? '#38bdf8' : '#cbd5e1' }}>
+              {storageHealth?.nativeBridgeActive
+                ? 'Nativo (.json + .bak)'
+                : storageHealth?.browserPersisted
+                ? 'Persistente OK'
+                : 'Navegador + Snapshots'}
+            </span>
+            <span className="stat-box-sub">
+              {storageHealth?.snapshotsCount ?? safetySnapshots.length} puntos de restauración
+            </span>
+          </div>
+        </div>
+
+        <p style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.4 }}>
+          Cada cambio se guarda con validación estricta y checksum de integridad en IndexedDB, en el espejo local y, en la app Android, en archivo atómico externo al WebView (`entrena_backup_v1.json` + `.bak`).
+        </p>
+
+        {/* Exportar e Importar */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
+          <button type="button" className="btn btn-primary btn-sm" style={{ minHeight: '42px' }} onClick={handleExportJson}>
+            <Download size={15} />
+            <span>Exportar JSON</span>
+          </button>
+
+          <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', minHeight: '42px' }}>
+            <Upload size={15} />
+            <span>Restaurar JSON</span>
+            <input
+              type="file"
+              accept=".json,application/json"
+              onChange={handleImportFile}
+              style={{ display: 'none' }}
+            />
+          </label>
+        </div>
+
+        {/* Selector de modo de importación */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+          <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600 }}>
+            Al restaurar un archivo JSON:
+          </span>
+          <div className="tab-pills">
+            <button
+              type="button"
+              className={`tab-pill ${importMode === 'merge' ? 'active' : ''}`}
+              onClick={() => setImportMode('merge')}
+            >
+              Fusionar (sin borrar)
+            </button>
+            <button
+              type="button"
+              className={`tab-pill ${importMode === 'replace' ? 'active' : ''}`}
+              onClick={() => setImportMode('replace')}
+            >
+              Reemplazar todo
+            </button>
+          </div>
+        </div>
+
+        {/* Puntos de Restauración Automáticos */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '2px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+            <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <History size={14} color="#38bdf8" /> Puntos de Restauración
+            </span>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              style={{ minHeight: '28px', padding: '2px 8px', fontSize: '0.72rem', color: '#38bdf8' }}
+              onClick={handleCreateManualSnapshot}
+            >
+              <BookmarkPlus size={13} /> Guardar punto
+            </button>
+          </div>
+
+          {safetySnapshots.length === 0 ? (
+            <div style={{ fontSize: '0.76rem', color: '#64748b', padding: '6px 0' }}>
+              Se crearán puntos automáticos diarios y antes de cualquier cambio masivo.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '210px', overflowY: 'auto' }}>
+              {safetySnapshots.slice(0, 6).map(snap => {
+                const isConfirming = confirmRestoreSnapId === snap.id;
+                const dateLabel = new Date(snap.createdAt).toLocaleString('es-ES', {
+                  day: '2-digit',
+                  month: '2-digit',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                });
+                return (
+                  <div
+                    key={snap.id}
+                    style={{
+                      background: 'var(--bg-subtle)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '10px',
+                      padding: '8px 10px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '8px'
+                    }}
+                  >
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {snap.label}
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>
+                        {dateLabel} · {snap.logsCount} días · {snap.bodyWeightsCount} pesajes
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${isConfirming ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{ minHeight: '30px', padding: '3px 10px', fontSize: '0.73rem', flexShrink: 0 }}
+                      onClick={() => handleRestoreSnapshot(snap)}
+                    >
+                      {isConfirming ? '¿Confirmar?' : 'Restaurar'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 2. PERFIL, METAS SEMANALES Y PISCINA */}
       <div className="card">
         <div className="card-header">
           <div className="card-title">
@@ -308,7 +524,7 @@ export const SettingsView: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. SECCIÓN PESO CORPORAL (MENSUAL) */}
+      {/* 3. SECCIÓN PESO CORPORAL (MENSUAL) */}
       <div className="card">
         <div className="card-header">
           <div className="card-title">
@@ -408,7 +624,7 @@ export const SettingsView: React.FC = () => {
         )}
       </div>
 
-      {/* 3. CATÁLOGO DE EJERCICIOS */}
+      {/* 4. CATÁLOGO DE EJERCICIOS */}
       <div className="card">
         <div className="card-header">
           <div className="card-title">
@@ -606,37 +822,6 @@ export const SettingsView: React.FC = () => {
         </div>
       </div>
 
-      {/* 4. COPIA DE SEGURIDAD LOCAL */}
-      <div className="card">
-        <div className="card-header">
-          <div className="card-title">
-            <Database size={18} color="#06b6d4" />
-            <span>Copia de Seguridad Offline</span>
-          </div>
-        </div>
-        <p style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
-          Tus datos se guardan exclusivamente en la memoria local de tu teléfono. Exporta una copia JSON periódicamente para conservar tu historial.
-        </p>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
-          <button type="button" className="btn btn-primary btn-sm" style={{ minHeight: '42px' }} onClick={handleExportJson}>
-            <Download size={15} />
-            <span>Exportar</span>
-          </button>
-
-          <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', minHeight: '42px' }}>
-            <Upload size={15} />
-            <span>Restaurar</span>
-            <input
-              type="file"
-              accept=".json"
-              onChange={handleImportFile}
-              style={{ display: 'none' }}
-            />
-          </label>
-        </div>
-      </div>
-
       {/* 5. MODO PRUEBA / DATOS DE DEMO */}
       <div className="card" style={{ borderColor: 'rgba(245, 158, 11, 0.3)' }}>
         <div className="card-header">
@@ -646,20 +831,23 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
         <p style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
-          Carga 90 días de entrenamientos realistas (natación, calistenia, pesas y pesajes) para probar todas las gráficas y proyecciones.
+          Carga 90 días de entrenamientos de prueba. Antes de ejecutar cualquier acción se crea un punto de restauración automático.
         </p>
 
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button
             type="button"
             className="btn btn-secondary btn-sm"
-            style={{ flex: '1 1 160px', borderColor: '#f59e0b', color: '#f59e0b', minHeight: '40px' }}
-            onClick={async () => {
-              await loadDemoAndRefresh();
-              showStatus('¡90 días de ejemplo cargados! Revisa Gráficas y Avance ✓');
+            style={{
+              flex: '1 1 160px',
+              borderColor: '#f59e0b',
+              color: '#f59e0b',
+              minHeight: '40px',
+              background: confirmDemoLoad ? 'rgba(245, 158, 11, 0.16)' : undefined
             }}
+            onClick={handleDemoClick}
           >
-            Cargar 90 días demo
+            {confirmDemoLoad ? `¿Sobrescribir ${logs.length} días? Pulsa otra vez` : 'Cargar 90 días demo'}
           </button>
 
           <button

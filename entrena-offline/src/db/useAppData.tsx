@@ -1,12 +1,14 @@
 // src/db/useAppData.tsx
-// Proveedor global de estado reactivo sincronizado con IndexedDB
+// Proveedor global de estado reactivo sincronizado con IndexedDB, auto-recuperación y respaldos durables
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import {
   DailyWorkoutLog,
   ExerciseDefinition,
   BodyWeightEntry,
-  AppSettings
+  AppSettings,
+  SafetySnapshot,
+  StorageHealthInfo
 } from '../types/models';
 import {
   getAllLogs,
@@ -20,7 +22,13 @@ import {
   getSettings,
   saveSettings,
   seedDemoData,
-  clearAllData
+  clearAllData,
+  recoverDataIfNeeded,
+  flushPendingDurableBackup,
+  getAllSafetySnapshots,
+  createSafetySnapshot,
+  restoreSafetySnapshot,
+  getStorageHealthInfo
 } from './database';
 import { toLocalDateKey } from '../utils/dates';
 
@@ -35,6 +43,10 @@ interface AppDataContextValue {
   isLoading: boolean;
   externalReloadToken: number;
   activeLog: DailyWorkoutLog | null;
+  recoveryNotice: string | null;
+  dismissRecoveryNotice: () => void;
+  storageHealth: StorageHealthInfo | null;
+  safetySnapshots: SafetySnapshot[];
   saveCurrentLog: (log: DailyWorkoutLog) => Promise<void>;
   deleteCurrentLog: (date: string) => Promise<void>;
   saveExerciseDef: (ex: ExerciseDefinition) => Promise<void>;
@@ -43,6 +55,8 @@ interface AppDataContextValue {
   updateSettings: (newSettings: AppSettings) => Promise<void>;
   loadDemoAndRefresh: () => Promise<void>;
   clearDataAndRefresh: () => Promise<void>;
+  createManualSnapshot: (label?: string) => Promise<boolean>;
+  restoreFromSnapshot: (snapshot: SafetySnapshot) => Promise<{ success: boolean; message: string }>;
   refreshData: (bumpExternalToken?: boolean) => Promise<void>;
 }
 
@@ -61,6 +75,22 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   });
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [externalReloadToken, setExternalReloadToken] = useState<number>(0);
+  const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
+  const [storageHealth, setStorageHealth] = useState<StorageHealthInfo | null>(null);
+  const [safetySnapshots, setSafetySnapshots] = useState<SafetySnapshot[]>([]);
+
+  const refreshSafetyInfo = useCallback(async () => {
+    try {
+      const [health, snaps] = await Promise.all([
+        getStorageHealthInfo(),
+        getAllSafetySnapshots()
+      ]);
+      setStorageHealth(health);
+      setSafetySnapshots(snaps);
+    } catch {
+      // ignorar
+    }
+  }, []);
 
   const refreshData = useCallback(async (bumpExternalToken = false) => {
     try {
@@ -82,15 +112,42 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (bumpExternalToken) {
         setExternalReloadToken(t => t + 1);
       }
+      await refreshSafetyInfo();
     } catch (err) {
       console.error('Error cargando datos de IndexedDB:', err);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [refreshSafetyInfo]);
 
   useEffect(() => {
-    refreshData(true);
+    let mounted = true;
+    (async () => {
+      const report = await recoverDataIfNeeded();
+      if (!mounted) return;
+      if (report.recovered) {
+        const origin = report.source === 'native' ? 'respaldo nativo del dispositivo' : 'copia espejo local';
+        setRecoveryNotice(`Se recuperaron automáticamente ${report.logsRestored || 0} días desde el ${origin}.`);
+      }
+      await refreshData(true);
+    })();
+
+    const handleVisibilityOrHide = () => {
+      if (document.visibilityState === 'hidden') {
+        void flushPendingDurableBackup();
+      }
+    };
+    const handlePageHide = () => {
+      void flushPendingDurableBackup();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityOrHide);
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      mounted = false;
+      document.removeEventListener('visibilitychange', handleVisibilityOrHide);
+      window.removeEventListener('pagehide', handlePageHide);
+    };
   }, [refreshData]);
 
   const logsMap = React.useMemo(() => {
@@ -131,6 +188,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const updateSettings = async (newSettings: AppSettings) => {
     await saveSettings(newSettings);
     setSettingsState(newSettings);
+    await refreshSafetyInfo();
   };
 
   const loadDemoAndRefresh = async () => {
@@ -143,6 +201,21 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setIsLoading(true);
     await clearAllData();
     await refreshData(true);
+  };
+
+  const createManualSnapshot = async (label = 'Punto manual'): Promise<boolean> => {
+    const snap = await createSafetySnapshot(label, true);
+    await flushPendingDurableBackup();
+    await refreshSafetyInfo();
+    return snap !== null;
+  };
+
+  const restoreFromSnapshot = async (snapshot: SafetySnapshot) => {
+    const res = await restoreSafetySnapshot(snapshot);
+    if (res.success) {
+      await refreshData(true);
+    }
+    return res;
   };
 
   return (
@@ -158,6 +231,10 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         isLoading,
         externalReloadToken,
         activeLog,
+        recoveryNotice,
+        dismissRecoveryNotice: () => setRecoveryNotice(null),
+        storageHealth,
+        safetySnapshots,
         saveCurrentLog,
         deleteCurrentLog,
         saveExerciseDef,
@@ -166,6 +243,8 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         updateSettings,
         loadDemoAndRefresh,
         clearDataAndRefresh,
+        createManualSnapshot,
+        restoreFromSnapshot,
         refreshData
       }}
     >

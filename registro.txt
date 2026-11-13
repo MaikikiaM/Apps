@@ -1224,3 +1224,23 @@ SESIÓN: 13/11/2026 - MEJORA INTEGRAL MÓVIL Y NUEVAS FUNCIONES ENTRENA-OFFLINE 
   * Inspección visual y DOM en navegador a `360×800`: 0 errores de consola y 0 elementos con desbordamiento horizontal (`scrollWidth <= clientWidth`) en las 5 pestañas.
   * `npm.cmd run build:apk`: Build Vite + APK `EntrenaOffline_v1.2.apk` (0.29 MB) generado y verificado con `apksigner` (v2/v3).
 ================================================================================
+
+================================================================================
+SESIÓN: 13/11/2026 - BLINDAJE MULTI-CAPA DE DATOS ENTRENA-OFFLINE v1.3
+================================================================================
+- Objetivo: Blindar todos los datos de `entrena-offline` (Web/PWA y APK Android) contra pérdida, corrupción de almacenamiento WebView o borrados accidentales, aplicando lecciones de `SpotiLocal`.
+- Medidas Implementadas:
+  1. Almacén Nativo Android Fuera de WebView (`scripts/build-apk.mjs`):
+     * `NativeBackupStore.java`: Escritura atómica mediante archivo temporal `.tmp` + `FileDescriptor.sync()` + renombrado atómico (`ATOMIC_MOVE` en API >= 26 con respaldo para API 24-25), auto-curación desde `.bak` y copias rotativas diarias (`entrena_daily_YYYY-MM-DD.json`, últimos 7 días).
+     * `EntrenaNativeBridge.java`: Interfaz `@JavascriptInterface` (`EntrenaNative`) para guardar/cargar estado durable, listar/cargar snapshots diarios y exportar backups JSON directamente a `MediaStore.Downloads` (`Descargas/EntrenaOffline/` en Android >= 10, o `getExternalFilesDir` en inferiores).
+     * `MainActivity.java` y `OfflineWebChromeClient.java`: Soporte nativo de selector de archivos (`onShowFileChooser` + `onActivityResult`) para que "Restaurar JSON" funcione dentro del WebView del APK.
+  2. Validación, Checksums y Recuperación Multi-Capa (`src/db/storageGuard.ts`, `src/db/database.ts`, `src/db/useAppData.tsx`, `src/App.tsx`):
+     * `storageGuard.ts`: Checksum determinista FNV-1a (`fnv-...`), validación y saneamiento estricto al importar/recuperar JSON (retrocompatible con copias v1 sin checksum), espejo redundante en `localStorage`, flag de borrado intencional (`entrena_intentional_clear_ts`) y hasta 5 snapshots de emergencia en `localStorage`.
+     * `database.ts`: `IndexedDB v2` con nuevo store `snapshots`, `navigator.storage.persist()`, cierre ordenado en `onversionchange`, sincronización durable debounced con flush inmediato en `visibilitychange`/`pagehide`, snapshots preventivos automáticos antes de importar, cargar demo o borrar datos, auto-recuperación en arranque (`recoverDataIfNeeded`) si IndexedDB aparece vacío inesperadamente (desde puente nativo, espejo `localStorage` o snapshot de emergencia) y modos de restauración `merge` (fusionar sin borrar historial) o `replace`.
+  3. Centro de Blindaje en Ajustes (`src/components/settings/SettingsView.tsx`):
+     * Tarjeta `Blindaje y Copias de Seguridad` con estado en vivo (espejo, persistencia/puente Android, último respaldo), exportación dual (Descargas Android / descarga Web), selector `Fusionar (seguro)` vs `Reemplazar todo`, creación manual y restauración en 2 toques de puntos de restauración, y confirmación en 2 toques para "Cargar Demo".
+- Verificación:
+  * `npm.cmd test`: 18/18 pruebas Vitest pasadas (`storageGuard.test.ts` 6 + `progressionEngine.test.ts` 7 + `stats.test.ts` 5).
+  * `npm.cmd run build:apk`: `tsc -b && vite build` + compilación Java/DEX (`NativeBackupStore`, `EntrenaNativeBridge`, `MainActivity`, `OfflineWebChromeClient`, `OfflineWebViewClient`) + generación y verificación v2/v3 de `EntrenaOffline_v1.3.apk` (0.30 MB, versionCode 4).
+  * Verificación en navegador móvil (`360×800`): tarjeta de blindaje, guardado manual de punto de restauración y selector de modo verificados sin errores de consola y sin desbordamiento horizontal (`scrollWidth <= clientWidth`).
+================================================================================

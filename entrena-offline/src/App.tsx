@@ -12,7 +12,7 @@ import './styles/theme.css';
 
 const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('logger');
-  const { setSelectedDateKey } = useAppData();
+  const { setSelectedDateKey, recoveryNotice, dismissRecoveryNotice } = useAppData();
 
   const handleSelectDateToLog = (dateKey: string) => {
     setSelectedDateKey(dateKey);
@@ -22,6 +22,35 @@ const AppContent: React.FC = () => {
   return (
     <div className="app-container">
       <TopHeader />
+
+      {recoveryNotice && (
+        <div
+          style={{
+            margin: '10px 14px 0 14px',
+            padding: '10px 12px',
+            borderRadius: '12px',
+            background: 'rgba(16, 185, 129, 0.16)',
+            border: '1px solid rgba(16, 185, 129, 0.45)',
+            color: '#6ee7b7',
+            fontSize: '0.8rem',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px'
+          }}
+        >
+          <span>🛡️ {recoveryNotice}</span>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            style={{ minHeight: '26px', padding: '2px 8px', color: '#a7f3d0' }}
+            onClick={dismissRecoveryNotice}
+          >
+            OK
+          </button>
+        </div>
+      )}
 
       {activeTab === 'logger' && <DailyLoggerView />}
       {activeTab === 'calendar' && <CalendarView onSelectDateToLog={handleSelectDateToLog} />}
