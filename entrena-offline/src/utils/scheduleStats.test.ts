@@ -7,10 +7,14 @@ import {
   getSpanishWeekdayIndex
 } from './dates';
 import {
+  computeGroupedEventHours,
   computeScheduleAccuracy,
+  formatHoursMinutesShort,
   formatTransportSummary,
+  getEventDurationMinutes,
   getScheduledEventsForDate,
   minutesToHHMM,
+  normalizeEventGroupKey,
   sortScheduleEvents
 } from './scheduleStats';
 import { ScheduleDayRecord, ScheduleEvent } from '../types/models';
@@ -203,5 +207,95 @@ describe('Fechas estilo español y Horario / Accuracy', () => {
     expect(report.accuracyPercent).toBe(66.7);
     expect(report.perEvent).toHaveLength(1);
     expect(report.perEvent[0].eventId).toBe('ev_uni');
+  });
+
+  it('conecta eventos con el mismo nombre normalizado y acumula horas semanal, mensual, anual e histórica', () => {
+    expect(normalizeEventGroupKey('  Cálculo   II ')).toBe('calculo ii');
+    expect(normalizeEventGroupKey('calculo ii')).toBe('calculo ii');
+    expect(formatHoursMinutesShort(0)).toBe('0h');
+    expect(formatHoursMinutesShort(45)).toBe('45m');
+    expect(formatHoursMinutesShort(120)).toBe('2h');
+    expect(formatHoursMinutesShort(90)).toBe('1h 30m');
+
+    const evCalcMon: ScheduleEvent = {
+      id: 'ev_calc_l',
+      title: 'calculo ii',
+      startTime: '09:00',
+      endTime: '11:00', // 120m
+      daysOfWeek: [0], // L
+      category: 'university',
+      startDateKey: '2025-10-01',
+      active: true,
+      createdAt: 1
+    };
+    const evCalcWed: ScheduleEvent = {
+      id: 'ev_calc_x',
+      title: 'Cálculo II',
+      startTime: '12:00',
+      endTime: '13:30', // 90m
+      daysOfWeek: [2], // X
+      category: 'university',
+      startDateKey: '2025-10-01',
+      active: true,
+      createdAt: 2
+    };
+    const evSwim: ScheduleEvent = {
+      id: 'ev_swim',
+      title: 'Natación',
+      startTime: '19:00',
+      endTime: '19:45', // 45m
+      daysOfWeek: [4], // V
+      category: 'swim',
+      startDateKey: '2026-11-01',
+      active: true,
+      createdAt: 3
+    };
+
+    expect(getEventDurationMinutes(evCalcMon)).toBe(120);
+    expect(getEventDurationMinutes(evCalcWed)).toBe(90);
+
+    // Hoy = Domingo 2026-11-15 -> semana actual L 2026-11-09 .. D 2026-11-15
+    const attendance: ScheduleDayRecord[] = [
+      // Año pasado (2025-12-10): solo cuenta en histórico (+120m)
+      { date: '2025-12-10', statuses: { ev_calc_l: 'completed' }, updatedAt: 1 },
+      // Este año, otro mes (2026-05-06): cuenta en año e histórico (+90m)
+      { date: '2026-05-06', statuses: { ev_calc_x: 'completed' }, updatedAt: 2 },
+      // Este mes, semana anterior (2026-11-04): cuenta en mes, año e histórico (+120m)
+      { date: '2026-11-04', statuses: { ev_calc_l: 'completed' }, updatedAt: 3 },
+      // Esta semana (2026-11-09 L y 2026-11-11 X): +120m +90m en los 4 periodos; missed no suma horas
+      { date: '2026-11-09', statuses: { ev_calc_l: 'completed' }, updatedAt: 4 },
+      { date: '2026-11-11', statuses: { ev_calc_x: 'completed' }, updatedAt: 5 },
+      { date: '2026-11-13', statuses: { ev_swim: 'completed', ev_calc_l: 'missed' }, updatedAt: 6 }
+    ];
+
+    const grouped = computeGroupedEventHours([evCalcMon, evCalcWed, evSwim], attendance, '2026-11-15');
+    expect(grouped.groups).toHaveLength(2);
+    expect(grouped.totals.connectedActivitiesCount).toBe(1);
+
+    const calcGroup = grouped.groups.find(g => g.groupKey === 'calculo ii');
+    expect(calcGroup).toBeDefined();
+    expect(calcGroup?.displayTitle).toBe('Cálculo II'); // prefirió variante acentuada
+    expect(calcGroup?.slotsCount).toBe(2);
+    expect(calcGroup?.plannedMinutesPerWeek).toBe(210); // 120 + 90
+    expect(calcGroup?.weeklyMinutes).toBe(210);         // 120 + 90
+    expect(calcGroup?.weeklySessions).toBe(2);
+    expect(calcGroup?.monthlyMinutes).toBe(330);        // 210 + 120
+    expect(calcGroup?.monthlySessions).toBe(3);
+    expect(calcGroup?.yearlyMinutes).toBe(420);         // 330 + 90
+    expect(calcGroup?.yearlySessions).toBe(4);
+    expect(calcGroup?.historicalMinutes).toBe(540);     // 420 + 120
+    expect(calcGroup?.historicalSessions).toBe(5);
+
+    expect(grouped.totals.weeklyMinutes).toBe(255);     // 210 + 45 swim
+    expect(grouped.totals.historicalMinutes).toBe(585); // 540 + 45 swim
+
+    // Verificar filtro combinado de accuracy por array de IDs del grupo
+    const groupAcc = computeScheduleAccuracy([evCalcMon, evCalcWed, evSwim], attendance, {
+      rangeDays: 14,
+      todayKey: '2026-11-15',
+      filterEventIds: calcGroup?.eventIds
+    });
+    expect(groupAcc.perEvent).toHaveLength(2);
+    expect(groupAcc.completed).toBe(3); // 04/11, 09/11, 11/11
   });
 });

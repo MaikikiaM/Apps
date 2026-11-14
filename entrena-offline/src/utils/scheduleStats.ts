@@ -2,7 +2,13 @@
 // Lógica de horario semanal recurrente, checklist diario y cálculo de Accuracy (% de asistencia)
 
 import { ScheduleCategory, ScheduleCheckStatus, ScheduleDayRecord, ScheduleEvent } from '../types/models';
-import { addDaysToDateKey, getDateRangeSequence, getSpanishWeekdayIndex, toLocalDateKey } from './dates';
+import {
+  addDaysToDateKey,
+  getDateRangeSequence,
+  getSpanishWeekdayIndex,
+  getWeekDateKeys,
+  toLocalDateKey
+} from './dates';
 
 export const SPANISH_WEEKDAY_SHORT = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
 export const SPANISH_WEEKDAY_NAMES = [
@@ -38,6 +44,35 @@ export const VALID_SCHEDULE_CATEGORIES = Object.keys(SCHEDULE_CATEGORY_META) as 
 export const EVENT_SELECTABLE_CATEGORIES = VALID_SCHEDULE_CATEGORIES.filter(
   cat => cat !== 'transport'
 );
+
+/** Normaliza el nombre de un evento para agrupar variantes con distinto intervalo horario. */
+export function normalizeEventGroupKey(title: string): string {
+  return title
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLocaleLowerCase('es')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+/** Duración del bloque horario en minutos (sin contar desplazamiento). */
+export function getEventDurationMinutes(ev: Pick<ScheduleEvent, 'startTime' | 'endTime'>): number {
+  const [sh, sm] = ev.startTime.split(':').map(n => parseInt(n, 10));
+  const [eh, em] = ev.endTime.split(':').map(n => parseInt(n, 10));
+  if ([sh, sm, eh, em].some(Number.isNaN)) return 0;
+  return Math.max(0, eh * 60 + em - (sh * 60 + sm));
+}
+
+/** Formatea una cantidad de minutos como duración compacta en español (p. ej. "2h 30m", "45m", "12h"). */
+export function formatHoursMinutesShort(totalMinutes: number): string {
+  const safe = Math.max(0, Math.round(totalMinutes));
+  if (safe === 0) return '0h';
+  const hours = Math.floor(safe / 60);
+  const mins = safe % 60;
+  if (hours === 0) return `${mins}m`;
+  if (mins === 0) return `${hours}h`;
+  return `${hours}h ${mins}m`;
+}
 
 export function minutesToHHMM(totalMinutes: number): string {
   const clamped = Math.max(0, Math.min(23 * 60 + 59, Math.round(totalMinutes)));
@@ -147,16 +182,21 @@ export function computeScheduleAccuracy(
     rangeDays?: number | null;
     todayKey?: string;
     filterEventId?: string | null;
+    filterEventIds?: string[] | null;
   } = {}
 ): ScheduleAccuracyReport {
   const todayKey = options.todayKey || toLocalDateKey(new Date());
   const rangeDays = options.rangeDays === undefined ? 30 : options.rangeDays;
   const filterEventId = options.filterEventId || null;
+  const filterEventIds =
+    options.filterEventIds && options.filterEventIds.length > 0 ? options.filterEventIds : null;
 
   const trackableEvents = events.filter(ev => ev.category !== 'transport');
-  const targetEvents = filterEventId
-    ? trackableEvents.filter(ev => ev.id === filterEventId)
-    : trackableEvents;
+  const targetEvents = filterEventIds
+    ? trackableEvents.filter(ev => filterEventIds.includes(ev.id))
+    : filterEventId
+      ? trackableEvents.filter(ev => ev.id === filterEventId)
+      : trackableEvents;
 
   if (targetEvents.length === 0) {
     return {
@@ -340,4 +380,161 @@ export function computeScheduleAccuracy(
     perEvent,
     dailySeries
   };
+}
+
+export interface GroupedEventSlotInfo {
+  id: string;
+  daysOfWeek: number[];
+  startTime: string;
+  endTime: string;
+  durationMinutes: number;
+  active: boolean;
+}
+
+export interface GroupedEventHoursSummary {
+  groupKey: string;
+  displayTitle: string;
+  category: ScheduleCategory;
+  eventIds: string[];
+  slotsCount: number;
+  slots: GroupedEventSlotInfo[];
+  plannedMinutesPerWeek: number;
+  weeklyMinutes: number;
+  weeklySessions: number;
+  monthlyMinutes: number;
+  monthlySessions: number;
+  yearlyMinutes: number;
+  yearlySessions: number;
+  historicalMinutes: number;
+  historicalSessions: number;
+}
+
+export interface GroupedEventHoursReport {
+  groups: GroupedEventHoursSummary[];
+  totals: {
+    weeklyMinutes: number;
+    monthlyMinutes: number;
+    yearlyMinutes: number;
+    historicalMinutes: number;
+    connectedActivitiesCount: number;
+  };
+}
+
+/**
+ * Agrupa eventos por nombre normalizado (insensible a mayúsculas/tildes/espacios)
+ * y suma las horas realizadas de forma semanal (semana actual L-D), mensual, anual e histórica.
+ */
+export function computeGroupedEventHours(
+  events: ScheduleEvent[],
+  attendanceRecords: ScheduleDayRecord[],
+  todayKeyInput?: string
+): GroupedEventHoursReport {
+  const todayKey = todayKeyInput || toLocalDateKey(new Date());
+  const weekKeys = getWeekDateKeys(todayKey);
+  const weekStartKey = weekKeys[0];
+  const weekEndKey = weekKeys[6];
+  const monthPrefix = todayKey.slice(0, 7); // 'YYYY-MM'
+  const yearPrefix = todayKey.slice(0, 4);  // 'YYYY'
+
+  const trackableEvents = sortScheduleEvents(events.filter(ev => ev.category !== 'transport'));
+  const groupsMap = new Map<string, GroupedEventHoursSummary>();
+  const eventLookup = new Map<string, { durationMinutes: number; group: GroupedEventHoursSummary }>();
+
+  for (const ev of trackableEvents) {
+    const cleanTitle = ev.title.trim().replace(/\s+/g, ' ');
+    const key = normalizeEventGroupKey(cleanTitle) || ev.id;
+    const durationMinutes = getEventDurationMinutes(ev);
+
+    let group = groupsMap.get(key);
+    if (!group) {
+      group = {
+        groupKey: key,
+        displayTitle: cleanTitle || ev.title,
+        category: ev.category,
+        eventIds: [],
+        slotsCount: 0,
+        slots: [],
+        plannedMinutesPerWeek: 0,
+        weeklyMinutes: 0,
+        weeklySessions: 0,
+        monthlyMinutes: 0,
+        monthlySessions: 0,
+        yearlyMinutes: 0,
+        yearlySessions: 0,
+        historicalMinutes: 0,
+        historicalSessions: 0
+      };
+      groupsMap.set(key, group);
+    } else if (/[^\u0000-\u007f]/.test(cleanTitle) && !/[^\u0000-\u007f]/.test(group.displayTitle)) {
+      // Preferir variante con tildes/eñe si existe
+      group.displayTitle = cleanTitle;
+    }
+
+    const sortedDays = [...(ev.daysOfWeek || [])].sort((a, b) => a - b);
+    group.eventIds.push(ev.id);
+    group.slotsCount += 1;
+    group.slots.push({
+      id: ev.id,
+      daysOfWeek: sortedDays,
+      startTime: ev.startTime,
+      endTime: ev.endTime,
+      durationMinutes,
+      active: ev.active
+    });
+    if (ev.active) {
+      group.plannedMinutesPerWeek += durationMinutes * sortedDays.length;
+    }
+
+    eventLookup.set(ev.id, { durationMinutes, group });
+  }
+
+  for (const rec of attendanceRecords) {
+    if (!rec.date || rec.date > todayKey) continue;
+    const statuses = rec.statuses || {};
+    const inWeek = rec.date >= weekStartKey && rec.date <= weekEndKey;
+    const inMonth = rec.date.slice(0, 7) === monthPrefix;
+    const inYear = rec.date.slice(0, 4) === yearPrefix;
+
+    for (const [eventId, status] of Object.entries(statuses)) {
+      if (status !== 'completed') continue;
+      const entry = eventLookup.get(eventId);
+      if (!entry) continue;
+
+      const { durationMinutes, group } = entry;
+      group.historicalSessions += 1;
+      group.historicalMinutes += durationMinutes;
+
+      if (inYear) {
+        group.yearlySessions += 1;
+        group.yearlyMinutes += durationMinutes;
+      }
+      if (inMonth) {
+        group.monthlySessions += 1;
+        group.monthlyMinutes += durationMinutes;
+      }
+      if (inWeek) {
+        group.weeklySessions += 1;
+        group.weeklyMinutes += durationMinutes;
+      }
+    }
+  }
+
+  const groups = Array.from(groupsMap.values());
+  const totals = {
+    weeklyMinutes: 0,
+    monthlyMinutes: 0,
+    yearlyMinutes: 0,
+    historicalMinutes: 0,
+    connectedActivitiesCount: 0
+  };
+
+  for (const g of groups) {
+    totals.weeklyMinutes += g.weeklyMinutes;
+    totals.monthlyMinutes += g.monthlyMinutes;
+    totals.yearlyMinutes += g.yearlyMinutes;
+    totals.historicalMinutes += g.historicalMinutes;
+    if (g.slotsCount > 1) totals.connectedActivitiesCount += 1;
+  }
+
+  return { groups, totals };
 }

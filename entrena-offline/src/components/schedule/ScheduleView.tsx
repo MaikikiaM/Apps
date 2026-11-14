@@ -16,7 +16,8 @@ import {
   CalendarDays,
   Target,
   Flame,
-  CheckCheck
+  CheckCheck,
+  Link2
 } from 'lucide-react';
 import { ChartConfiguration } from 'chart.js';
 import { useAppData } from '../../db/useAppData';
@@ -32,10 +33,13 @@ import {
   toLocalDateKey
 } from '../../utils/dates';
 import {
+  computeGroupedEventHours,
   computeScheduleAccuracy,
   EVENT_SELECTABLE_CATEGORIES,
+  formatHoursMinutesShort,
   formatTransportSummary,
   getScheduledEventsForDate,
+  normalizeEventGroupKey,
   SCHEDULE_CATEGORY_META,
   SPANISH_WEEKDAY_SHORT,
   sortScheduleEvents
@@ -120,15 +124,68 @@ export const ScheduleView: React.FC = () => {
     return { completed, missed, pending: Math.max(0, total - completed - missed), total, pct };
   }, [dayEvents, statusesOnSelected]);
 
-  // Informe de Accuracy
+  // Agrupación automática por nombre de evento y cálculo de horas (Semana / Mes / Año / Histórico)
+  const groupedHoursReport = useMemo(
+    () => computeGroupedEventHours(scheduleEvents, scheduleAttendance, todayKey),
+    [scheduleEvents, scheduleAttendance, todayKey]
+  );
+
+  const groupByKeyMap = useMemo(() => {
+    const map = new Map<string, (typeof groupedHoursReport.groups)[number]>();
+    for (const g of groupedHoursReport.groups) {
+      map.set(g.groupKey, g);
+    }
+    return map;
+  }, [groupedHoursReport]);
+
+  const connectedGroups = useMemo(
+    () => groupedHoursReport.groups.filter(g => g.slotsCount > 1),
+    [groupedHoursReport]
+  );
+
+  const activeFilterGroup = filterEventId.startsWith('group:')
+    ? groupByKeyMap.get(filterEventId.slice(6)) || null
+    : null;
+
+  const displayedHourGroups = useMemo(() => {
+    if (activeFilterGroup) return [activeFilterGroup];
+    if (filterEventId !== 'all') {
+      return groupedHoursReport.groups.filter(g => g.eventIds.includes(filterEventId));
+    }
+    return groupedHoursReport.groups;
+  }, [groupedHoursReport, activeFilterGroup, filterEventId]);
+
+  const displayedHourTotals = useMemo(() => {
+    return displayedHourGroups.reduce(
+      (acc, g) => ({
+        weeklyMinutes: acc.weeklyMinutes + g.weeklyMinutes,
+        monthlyMinutes: acc.monthlyMinutes + g.monthlyMinutes,
+        yearlyMinutes: acc.yearlyMinutes + g.yearlyMinutes,
+        historicalMinutes: acc.historicalMinutes + g.historicalMinutes
+      }),
+      { weeklyMinutes: 0, monthlyMinutes: 0, yearlyMinutes: 0, historicalMinutes: 0 }
+    );
+  }, [displayedHourGroups]);
+
+  const matchingExistingGroup = useMemo(() => {
+    const key = normalizeEventGroupKey(formTitle);
+    if (!key) return null;
+    const found = groupByKeyMap.get(key);
+    if (!found) return null;
+    if (editingId && found.eventIds.every(id => id === editingId)) return null;
+    return found;
+  }, [formTitle, groupByKeyMap, editingId]);
+
+  // Informe de Accuracy (individual o agrupado por actividad)
   const accuracyReport = useMemo(
     () =>
       computeScheduleAccuracy(scheduleEvents, scheduleAttendance, {
         rangeDays,
         todayKey,
-        filterEventId: filterEventId === 'all' ? null : filterEventId
+        filterEventId: filterEventId === 'all' || activeFilterGroup ? null : filterEventId,
+        filterEventIds: activeFilterGroup ? activeFilterGroup.eventIds : null
       }),
-    [scheduleEvents, scheduleAttendance, rangeDays, todayKey, filterEventId]
+    [scheduleEvents, scheduleAttendance, rangeDays, todayKey, filterEventId, activeFilterGroup]
   );
 
   // Gráfica de evolución Accuracy con fechas DD/MM
@@ -687,24 +744,35 @@ export const ScheduleView: React.FC = () => {
 
           {sortedScheduleEvents.length > 0 && (
             <div className="input-group">
-              <label className="input-label">Filtrar por evento</label>
+              <label className="input-label">Filtrar por evento o actividad agrupada</label>
               <select
                 className="input-field"
                 value={filterEventId}
                 onChange={e => setFilterEventId(e.target.value)}
               >
                 <option value="all">Todos los eventos del horario</option>
-                {sortedScheduleEvents.map(ev => {
-                  const daysLabel = [...ev.daysOfWeek]
-                    .sort((a, b) => a - b)
-                    .map(d => SPANISH_WEEKDAY_SHORT[d])
-                    .join('·');
-                  return (
-                    <option key={ev.id} value={ev.id}>
-                      {daysLabel} · {ev.startTime}–{ev.endTime} · {ev.title}
-                    </option>
-                  );
-                })}
+                {connectedGroups.length > 0 && (
+                  <optgroup label="Actividades agrupadas (mismo nombre)">
+                    {connectedGroups.map(g => (
+                      <option key={`group:${g.groupKey}`} value={`group:${g.groupKey}`}>
+                        🔗 {g.displayTitle} (todos · {g.slotsCount} horarios)
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label="Horarios individuales">
+                  {sortedScheduleEvents.map(ev => {
+                    const daysLabel = [...ev.daysOfWeek]
+                      .sort((a, b) => a - b)
+                      .map(d => SPANISH_WEEKDAY_SHORT[d])
+                      .join('·');
+                    return (
+                      <option key={ev.id} value={ev.id}>
+                        {daysLabel} · {ev.startTime}–{ev.endTime} · {ev.title}
+                      </option>
+                    );
+                  })}
+                </optgroup>
               </select>
             </div>
           )}
@@ -809,6 +877,178 @@ export const ScheduleView: React.FC = () => {
             </div>
           )}
 
+          {/* Horas realizadas agrupadas por nombre de actividad */}
+          {displayedHourGroups.length > 0 && (
+            <div className="card">
+              <div className="card-header" style={{ marginBottom: '10px' }}>
+                <div className="card-title">
+                  <Clock size={18} color="#38bdf8" />
+                  <span>Horas por Actividad</span>
+                </div>
+                {groupedHoursReport.totals.connectedActivitiesCount > 0 && (
+                  <span
+                    className="pill-badge"
+                    style={{ background: 'rgba(56, 189, 248, 0.16)', color: '#67e8f9', borderColor: 'rgba(56, 189, 248, 0.35)' }}
+                  >
+                    🔗 {groupedHoursReport.totals.connectedActivitiesCount}{' '}
+                    {groupedHoursReport.totals.connectedActivitiesCount === 1 ? 'conectada' : 'conectadas'}
+                  </span>
+                )}
+              </div>
+
+              {/* Resumen global Semana / Mes / Año / Histórico */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                  gap: '6px',
+                  marginBottom: '12px'
+                }}
+              >
+                {[
+                  { label: 'Semana', mins: displayedHourTotals.weeklyMinutes, color: '#38bdf8' },
+                  { label: 'Mes', mins: displayedHourTotals.monthlyMinutes, color: '#34d399' },
+                  { label: 'Año', mins: displayedHourTotals.yearlyMinutes, color: '#c084fc' },
+                  { label: 'Histórico', mins: displayedHourTotals.historicalMinutes, color: '#fbbf24' }
+                ].map(cell => (
+                  <div
+                    key={cell.label}
+                    style={{
+                      background: '#0b1120',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '10px',
+                      padding: '8px 6px',
+                      textAlign: 'center',
+                      minWidth: 0
+                    }}
+                  >
+                    <div style={{ fontSize: '0.66rem', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase' }}>
+                      {cell.label}
+                    </div>
+                    <div style={{ fontSize: '0.94rem', fontWeight: 800, color: cell.color, marginTop: '2px' }}>
+                      {formatHoursMinutesShort(cell.mins)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {displayedHourGroups.map(group => {
+                  const meta = SCHEDULE_CATEGORY_META[group.category] || SCHEDULE_CATEGORY_META.other;
+                  const isConnected = group.slotsCount > 1;
+                  const isGroupFiltered = filterEventId === `group:${group.groupKey}`;
+                  const slotsText = group.slots
+                    .map(slot => {
+                      const d = slot.daysOfWeek.map(idx => SPANISH_WEEKDAY_SHORT[idx]).join('·');
+                      return `${d} ${slot.startTime}–${slot.endTime}`;
+                    })
+                    .join(' · ');
+
+                  return (
+                    <div
+                      key={group.groupKey}
+                      style={{
+                        background: 'var(--bg-subtle)',
+                        borderRadius: '12px',
+                        padding: '10px 11px',
+                        border: isGroupFiltered ? '1px solid #38bdf8' : '1px solid var(--border-color)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--text-main)' }}>
+                              {group.displayTitle}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                color: meta.color,
+                                background: meta.bg,
+                                padding: '2px 7px',
+                                borderRadius: '9999px'
+                              }}
+                            >
+                              {meta.label}
+                            </span>
+                            {isConnected && (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px',
+                                  fontSize: '0.68rem',
+                                  fontWeight: 700,
+                                  color: '#67e8f9',
+                                  background: 'rgba(6, 182, 212, 0.16)',
+                                  padding: '2px 7px',
+                                  borderRadius: '9999px'
+                                }}
+                              >
+                                <Link2 size={10} />
+                                {group.slotsCount} horarios
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '3px', wordBreak: 'break-word' }}>
+                            {slotsText}
+                            {group.plannedMinutesPerWeek > 0 && ` · Plan: ${formatHoursMinutesShort(group.plannedMinutesPerWeek)}/sem`}
+                          </div>
+                        </div>
+                        {isConnected && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            style={{ minHeight: '26px', padding: '2px 7px', fontSize: '0.68rem', color: '#38bdf8', flexShrink: 0 }}
+                            onClick={() => setFilterEventId(isGroupFiltered ? 'all' : `group:${group.groupKey}`)}
+                          >
+                            {isGroupFiltered ? 'Ver todo' : 'Filtrar'}
+                          </button>
+                        )}
+                      </div>
+
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                          gap: '5px',
+                          marginTop: '8px'
+                        }}
+                      >
+                        {[
+                          { label: 'Sem.', mins: group.weeklyMinutes, sess: group.weeklySessions },
+                          { label: 'Mes', mins: group.monthlyMinutes, sess: group.monthlySessions },
+                          { label: 'Año', mins: group.yearlyMinutes, sess: group.yearlySessions },
+                          { label: 'Hist.', mins: group.historicalMinutes, sess: group.historicalSessions }
+                        ].map(period => (
+                          <div
+                            key={period.label}
+                            style={{
+                              background: 'rgba(15, 23, 42, 0.65)',
+                              borderRadius: '8px',
+                              padding: '5px 4px',
+                              textAlign: 'center',
+                              minWidth: 0
+                            }}
+                          >
+                            <div style={{ fontSize: '0.64rem', color: '#64748b', fontWeight: 700 }}>{period.label}</div>
+                            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: period.mins > 0 ? '#f8fafc' : '#64748b' }}>
+                              {formatHoursMinutesShort(period.mins)}
+                            </div>
+                            <div style={{ fontSize: '0.6rem', color: '#64748b' }}>
+                              {period.sess} ses.
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Desglose por evento */}
           {accuracyReport.perEvent.length > 0 && (
             <div className="card">
@@ -896,6 +1136,28 @@ export const ScheduleView: React.FC = () => {
                   onChange={e => setFormTitle(e.target.value)}
                   maxLength={50}
                 />
+                {matchingExistingGroup && (
+                  <div
+                    style={{
+                      marginTop: '5px',
+                      fontSize: '0.72rem',
+                      color: '#67e8f9',
+                      background: 'rgba(6, 182, 212, 0.12)',
+                      border: '1px solid rgba(6, 182, 212, 0.3)',
+                      borderRadius: '8px',
+                      padding: '5px 8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px'
+                    }}
+                  >
+                    <Link2 size={12} />
+                    <span>
+                      Se conectará con «{matchingExistingGroup.displayTitle}» ({matchingExistingGroup.slotsCount}{' '}
+                      {matchingExistingGroup.slotsCount === 1 ? 'horario ya creado' : 'horarios ya creados'}) y sumará sus horas.
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
@@ -1140,6 +1402,7 @@ export const ScheduleView: React.FC = () => {
                     .sort((a, b) => a - b)
                     .map(d => SPANISH_WEEKDAY_SHORT[d])
                     .join(' · ');
+                  const eventGroup = groupByKeyMap.get(normalizeEventGroupKey(ev.title) || ev.id);
                   return (
                     <div
                       key={ev.id}
@@ -1187,6 +1450,11 @@ export const ScheduleView: React.FC = () => {
                           </div>
                           <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '2px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                             <span>Desde el {formatSpanishDateSlash(ev.startDateKey)}</span>
+                            {eventGroup && eventGroup.slotsCount > 1 && (
+                              <span style={{ color: '#67e8f9' }}>
+                                🔗 {eventGroup.slotsCount} horarios · {formatHoursMinutesShort(eventGroup.historicalMinutes)} acum.
+                              </span>
+                            )}
                             {formatTransportSummary(ev) && (
                               <span style={{ color: '#94a3b8' }}>🚌 {formatTransportSummary(ev)}</span>
                             )}

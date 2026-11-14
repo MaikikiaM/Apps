@@ -1370,3 +1370,28 @@ SESIÓN: 15/11/2026 - NORMALIZACIÓN DE REGLAS Y REGISTRO LITERAL DE PROMPTS
 - `Apps/AGENTS.md`: creado protocolo operativo local reforzando `- Prompts literales del usuario:` palabra por palabra antes de cualquier `- Objetivo:` opcional y filtros de artefactos Android/Web.
 - `Apps/registro.txt`: añadidos prompts literales exactos recuperados de `transcript_full.jsonl` (`10bedccd`) en las sesiones de `SpotiLocal v1.8.5`, `v1.8.6`, `v1.8.7` y sincronización al monorrepo (`13/11/2026`), manteniendo intacto el historial de `SpotiLocal` y `entrena-offline v1.2–v1.8`.
 ================================================================================
+
+================================================================================
+SESIÓN: 15/11/2026 - AGRUPACIÓN POR NOMBRE Y HORAS REALIZADAS (SEMANA/MES/AÑO/HISTÓRICO) v1.9
+================================================================================
+- Prompts literales del usuario:
+  * [15/11/2026 00:38]: "procede" (aprobación de propuesta `/learn` para actualizar `C:\Users\migue\.gemini\config\AGENTS.md` con exigencia de prompts literales en `registro.txt`)
+  * [15/11/2026 00:45]: "Molaria que la app detectase nombres iguales de eventos y agrupase despues de alguna forma cuantas horas se han llevado a cabo de forma semanal, mensual, anual, historica... Al final pongo eventos distintos para mismas cosas que tienen distintos inytervalos horarios y molaria que aun asi hubiese algo de conexion"
+- Cambios y Soluciones Aplicadas:
+  1. Motor de Detección de Nombres y Cómputo de Horas (`src/utils/scheduleStats.ts`):
+     * `normalizeEventGroupKey`: Agrupación automática insensible a mayúsculas, espacios múltiples y tildes (p. ej. `"Cálculo II"` y `"calculo ii"` se conectan automáticamente).
+     * `getEventDurationMinutes` y `formatHoursMinutesShort` (`"0h"`, `"45m"`, `"2h"`, `"1h 30m"`).
+     * `computeGroupedEventHours`: Calcula sesiones completadas y horas dedicadas por actividad agrupada en **Semana actual (L–D)**, **Mes natural**, **Año natural** e **Histórico acumulado**, además de la carga semanal planificada (`Plan: Xh/sem`) excluyendo bloques `transport`.
+     * `computeScheduleAccuracy`: Soporte `filterEventIds?: string[] | null` para calcular estadísticas, rachas y gráfica unificadas sobre todos los intervalos de una misma actividad.
+  2. Conexión Visual y Panel en Interfaz (`src/components/schedule/ScheduleView.tsx`):
+     * Nuevo bloque **Horas por Actividad** en `Accuracy` con totales globales de 4 columnas (`Semana`, `Mes`, `Año`, `Histórico`), insignia `🔗 X conectada(s)`, resumen de intervalos vinculados por actividad y botón `Filtrar` rápido.
+     * Selector **Filtrar por evento o actividad agrupada** con sección dedicada (`Actividades agrupadas (mismo nombre)`).
+     * En `Eventos`, aviso en vivo al escribir un nombre coincidente (`🔗 Se conectará con «...»`) y badge `🔗 X horarios · Yh acum.` en tarjetas conectadas.
+  3. Regla Global `/learn` y Versionado (`C:\Users\migue\.gemini\config\AGENTS.md`, `v1.9`):
+     * Aplicada actualización aprobada a `AGENTS.md` obligando el guardado de prompts literales del usuario.
+     * Actualizada versión a `v1.9` (`versionCode="10"`, `EntrenaOffline_v1.9.apk`).
+- Verificación:
+  * `npm.cmd test`: 24/24 pruebas Vitest pasadas en 4 archivos (`scheduleStats.test.ts` 5, `storageGuard.test.ts` 7, `progressionEngine.test.ts` 7, `stats.test.ts` 5).
+  * `npm.cmd run build:apk`: `tsc -b && vite build` sin errores y generado `EntrenaOffline_v1.9.apk` (0.31 MB, firma v2/v3 verificada con `apksigner`).
+  * Inspección móvil en vivo (`360×800`): Al crear un segundo horario de `"Natación (piscina)"` (`S · 10:00–11:30`), detectó la conexión al vuelo, vinculó ambos tramos (`🔗 2 horarios`), calculó `Semana / Mes / Año / Histórico` y permitió filtrar el Accuracy unificado, con 0 errores de consola y 0 scroll horizontal.
+================================================================================
