@@ -1279,3 +1279,15 @@ SESIÓN: 15/11/2026 - ORDEN POR HORAS Y CALENDARIO SEMANAL ESTILO GOOGLE CALENDA
   * `npm.cmd run build:apk`: `tsc -b && vite build` sin errores y generado `EntrenaOffline_v1.5.apk` (versionCode 6, firma v2/v3 verificada con `apksigner`).
   * Inspección móvil (`360×800`): 4 sub-pestañas en fila única sin desbordamiento horizontal, orden estricto por horas comprobado al añadir evento de mañana (`09:00` por delante de `18:00`), cuadrícula semanal L–D/L–V interactiva y corregido warning de React en estilos de borde.
 ================================================================================
+
+================================================================================
+SESIÓN: 15/11/2026 - NUEVAS CATEGORÍAS DE HORARIO (UNIVERSIDAD, CONSERVATORIO...) v1.6
+================================================================================
+- Objetivo: Ampliar el catálogo de categorías seleccionables para el horario semanal (`Universidad`, `Conservatorio`, etc.) con colores diferenciados en el calendario y validación en copias de seguridad.
+- Cambios Aplicados:
+  * `models.ts`, `scheduleStats.ts`, `storageGuard.ts`: Ampliado `ScheduleCategory` y `SCHEDULE_CATEGORY_META` a 11 categorías con colores propios: `Universidad`, `Conservatorio`, `Estudio / Academia`, `Idiomas`, `Trabajo / Proyecto`, `Natación`, `Fuerza / Gym`, `Cardio / Running`, `Hábito / Salud`, `Ocio / Descanso` y `Otro`.
+  * `storageGuard.test.ts`: Añadida validación de ida y vuelta v3 específica para `university` y `conservatory`.
+- Verificación:
+  * `npm.cmd test`: 22/22 pruebas Vitest pasadas.
+  * `npm.cmd run build:apk`: `tsc -b && vite build` + generación y firma v2/v3 de `EntrenaOffline_v1.6.apk` (`versionCode="7"`).
+================================================================================

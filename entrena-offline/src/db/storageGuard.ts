@@ -331,7 +331,19 @@ export function validateAndNormalizeBackupJson(jsonStr: string): ValidationResul
 
   // Normalizar horario recurrente (v3+)
   const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
-  const VALID_CATEGORIES: ScheduleCategory[] = ['swim', 'strength', 'study', 'habit', 'other'];
+  const VALID_CATEGORIES: ScheduleCategory[] = [
+    'university',
+    'conservatory',
+    'study',
+    'languages',
+    'work',
+    'swim',
+    'strength',
+    'cardio',
+    'habit',
+    'leisure',
+    'other'
+  ];
   const evMap = new Map<string, ScheduleEvent>();
   if (Array.isArray(raw.scheduleEvents)) {
     for (const item of raw.scheduleEvents) {

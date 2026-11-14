@@ -19,12 +19,20 @@ export const SCHEDULE_CATEGORY_META: Record<
   ScheduleCategory,
   { label: string; color: string; bg: string }
 > = {
-  swim: { label: 'Natación', color: '#06b6d4', bg: 'rgba(6, 182, 212, 0.16)' },
-  strength: { label: 'Fuerza', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)' },
-  study: { label: 'Estudio / Trabajo', color: '#a855f7', bg: 'rgba(168, 85, 247, 0.16)' },
-  habit: { label: 'Hábito', color: '#10b981', bg: 'rgba(16, 185, 129, 0.16)' },
+  university: { label: 'Universidad', color: '#818cf8', bg: 'rgba(99, 102, 241, 0.22)' },
+  conservatory: { label: 'Conservatorio', color: '#f472b6', bg: 'rgba(236, 72, 153, 0.22)' },
+  study: { label: 'Estudio / Academia', color: '#c084fc', bg: 'rgba(168, 85, 247, 0.20)' },
+  languages: { label: 'Idiomas', color: '#2dd4bf', bg: 'rgba(20, 184, 166, 0.20)' },
+  work: { label: 'Trabajo / Proyecto', color: '#60a5fa', bg: 'rgba(59, 130, 246, 0.20)' },
+  swim: { label: 'Natación', color: '#22d3ee', bg: 'rgba(6, 182, 212, 0.18)' },
+  strength: { label: 'Fuerza / Gym', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.18)' },
+  cardio: { label: 'Cardio / Running', color: '#fb7185', bg: 'rgba(244, 63, 94, 0.18)' },
+  habit: { label: 'Hábito / Salud', color: '#34d399', bg: 'rgba(16, 185, 129, 0.18)' },
+  leisure: { label: 'Ocio / Descanso', color: '#facc15', bg: 'rgba(234, 179, 8, 0.18)' },
   other: { label: 'Otro', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.16)' }
 };
+
+export const VALID_SCHEDULE_CATEGORIES = Object.keys(SCHEDULE_CATEGORY_META) as ScheduleCategory[];
 
 export function sortScheduleEvents(events: ScheduleEvent[]): ScheduleEvent[] {
   return [...events].sort((a, b) => {

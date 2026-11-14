@@ -104,7 +104,18 @@ export interface MetricProjection {
   dataPointsCount: number;
 }
 
-export type ScheduleCategory = 'swim' | 'strength' | 'study' | 'habit' | 'other';
+export type ScheduleCategory =
+  | 'university'
+  | 'conservatory'
+  | 'study'
+  | 'languages'
+  | 'work'
+  | 'swim'
+  | 'strength'
+  | 'cardio'
+  | 'habit'
+  | 'leisure'
+  | 'other';
 
 export type ScheduleCheckStatus = 'completed' | 'missed';
 
