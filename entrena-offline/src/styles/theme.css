@@ -169,13 +169,14 @@ input[type="number"]::-webkit-outer-spin-button {
   background: none;
   border: none;
   color: var(--text-muted);
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   font-weight: 500;
-  padding: 7px 2px;
+  padding: 6px 2px;
   cursor: pointer;
   border-radius: var(--radius-md);
   transition: all 0.15s ease;
-  min-height: 48px;
+  min-height: 46px;
+  white-space: nowrap;
   touch-action: manipulation;
 }
 

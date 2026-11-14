@@ -4,6 +4,7 @@ import { AppDataProvider, useAppData } from './db/useAppData';
 import { TopHeader } from './components/layout/TopHeader';
 import { BottomNav, ActiveTab } from './components/layout/BottomNav';
 import { DailyLoggerView } from './components/logger/DailyLoggerView';
+import { ScheduleView } from './components/schedule/ScheduleView';
 import { CalendarView } from './components/calendar/CalendarView';
 import { ChartsHubView } from './components/charts/ChartsHubView';
 import { MathProgressView } from './components/analytics/MathProgressView';
@@ -53,6 +54,7 @@ const AppContent: React.FC = () => {
       )}
 
       {activeTab === 'logger' && <DailyLoggerView />}
+      {activeTab === 'schedule' && <ScheduleView />}
       {activeTab === 'calendar' && <CalendarView onSelectDateToLog={handleSelectDateToLog} />}
       {activeTab === 'charts' && <ChartsHubView />}
       {activeTab === 'math' && <MathProgressView />}

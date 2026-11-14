@@ -8,6 +8,9 @@ import {
   BodyWeightEntry,
   AppSettings,
   SafetySnapshot,
+  ScheduleCheckStatus,
+  ScheduleDayRecord,
+  ScheduleEvent,
   StorageHealthInfo
 } from '../types/models';
 import {
@@ -21,6 +24,11 @@ import {
   deleteBodyWeight,
   getSettings,
   saveSettings,
+  getAllScheduleEvents,
+  saveScheduleEvent,
+  deleteScheduleEvent,
+  getAllScheduleAttendance,
+  saveScheduleDayAttendance,
   seedDemoData,
   clearAllData,
   recoverDataIfNeeded,
@@ -40,6 +48,9 @@ interface AppDataContextValue {
   exercises: ExerciseDefinition[];
   bodyWeights: BodyWeightEntry[];
   settings: AppSettings;
+  scheduleEvents: ScheduleEvent[];
+  scheduleAttendance: ScheduleDayRecord[];
+  attendanceMap: Map<string, Record<string, ScheduleCheckStatus>>;
   isLoading: boolean;
   externalReloadToken: number;
   activeLog: DailyWorkoutLog | null;
@@ -53,6 +64,10 @@ interface AppDataContextValue {
   saveWeightRecord: (entry: BodyWeightEntry) => Promise<void>;
   deleteWeightRecord: (date: string) => Promise<void>;
   updateSettings: (newSettings: AppSettings) => Promise<void>;
+  saveScheduleEventItem: (event: ScheduleEvent) => Promise<void>;
+  deleteScheduleEventItem: (id: string) => Promise<void>;
+  setScheduleEventCheck: (dateKey: string, eventId: string, status: ScheduleCheckStatus | null) => Promise<void>;
+  setAllScheduleChecksForDate: (dateKey: string, eventIds: string[], status: ScheduleCheckStatus) => Promise<void>;
   loadDemoAndRefresh: () => Promise<void>;
   clearDataAndRefresh: () => Promise<void>;
   createManualSnapshot: (label?: string) => Promise<boolean>;
@@ -67,6 +82,8 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [logs, setLogs] = useState<DailyWorkoutLog[]>([]);
   const [exercises, setExercises] = useState<ExerciseDefinition[]>([]);
   const [bodyWeights, setBodyWeights] = useState<BodyWeightEntry[]>([]);
+  const [scheduleEvents, setScheduleEvents] = useState<ScheduleEvent[]>([]);
+  const [scheduleAttendance, setScheduleAttendance] = useState<ScheduleDayRecord[]>([]);
   const [settings, setSettingsState] = useState<AppSettings>({
     poolLengthDefault: 25,
     targetDaysWeekly: 4,
@@ -94,15 +111,19 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const refreshData = useCallback(async (bumpExternalToken = false) => {
     try {
-      const [fetchedLogs, fetchedExercises, fetchedWeights, fetchedSettings] = await Promise.all([
+      const [fetchedLogs, fetchedExercises, fetchedWeights, fetchedSettings, fetchedScheduleEvents, fetchedScheduleAttendance] = await Promise.all([
         getAllLogs(),
         getAllExercises(),
         getAllBodyWeights(),
-        getSettings()
+        getSettings(),
+        getAllScheduleEvents(),
+        getAllScheduleAttendance()
       ]);
       setLogs(fetchedLogs);
       setExercises(fetchedExercises);
       setBodyWeights(fetchedWeights);
+      setScheduleEvents(fetchedScheduleEvents);
+      setScheduleAttendance(fetchedScheduleAttendance);
       setSettingsState({
         targetDaysWeekly: 4,
         targetSwimMetersWeekly: 2000,
@@ -158,6 +179,14 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return map;
   }, [logs]);
 
+  const attendanceMap = React.useMemo(() => {
+    const map = new Map<string, Record<string, ScheduleCheckStatus>>();
+    for (const rec of scheduleAttendance) {
+      map.set(rec.date, rec.statuses || {});
+    }
+    return map;
+  }, [scheduleAttendance]);
+
   const activeLog = logsMap.get(selectedDateKey) || null;
 
   const saveCurrentLog = async (log: DailyWorkoutLog) => {
@@ -189,6 +218,52 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     await saveSettings(newSettings);
     setSettingsState(newSettings);
     await refreshSafetyInfo();
+  };
+
+  const saveScheduleEventItem = async (event: ScheduleEvent) => {
+    await saveScheduleEvent(event);
+    await refreshData(false);
+  };
+
+  const deleteScheduleEventItem = async (id: string) => {
+    await deleteScheduleEvent(id);
+    await refreshData(false);
+  };
+
+  const setScheduleEventCheck = async (
+    dateKey: string,
+    eventId: string,
+    status: ScheduleCheckStatus | null
+  ) => {
+    const prevStatuses = { ...(attendanceMap.get(dateKey) || {}) };
+    if (status === null) {
+      delete prevStatuses[eventId];
+    } else {
+      prevStatuses[eventId] = status;
+    }
+    await saveScheduleDayAttendance({
+      date: dateKey,
+      statuses: prevStatuses,
+      updatedAt: Date.now()
+    });
+    await refreshData(false);
+  };
+
+  const setAllScheduleChecksForDate = async (
+    dateKey: string,
+    eventIds: string[],
+    status: ScheduleCheckStatus
+  ) => {
+    const nextStatuses = { ...(attendanceMap.get(dateKey) || {}) };
+    for (const id of eventIds) {
+      nextStatuses[id] = status;
+    }
+    await saveScheduleDayAttendance({
+      date: dateKey,
+      statuses: nextStatuses,
+      updatedAt: Date.now()
+    });
+    await refreshData(false);
   };
 
   const loadDemoAndRefresh = async () => {
@@ -228,6 +303,9 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         exercises,
         bodyWeights,
         settings,
+        scheduleEvents,
+        scheduleAttendance,
+        attendanceMap,
         isLoading,
         externalReloadToken,
         activeLog,
@@ -241,6 +319,10 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         saveWeightRecord,
         deleteWeightRecord,
         updateSettings,
+        saveScheduleEventItem,
+        deleteScheduleEventItem,
+        setScheduleEventCheck,
+        setAllScheduleChecksForDate,
         loadDemoAndRefresh,
         clearDataAndRefresh,
         createManualSnapshot,

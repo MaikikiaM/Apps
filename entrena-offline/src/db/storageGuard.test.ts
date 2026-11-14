@@ -189,4 +189,51 @@ describe('storageGuard - Validación, checksums y espejo local', () => {
     expect(stored).toHaveLength(5);
     expect(stored[0].id).toBe('snap-6');
   });
+
+  it('valida copias v3 con horario y asistencia y mantiene compatibilidad con checksums v2', () => {
+    const v3Payload = buildVerifiedBackupPayload(
+      sampleLogs,
+      sampleExercises,
+      sampleBodyweight,
+      sampleSettings,
+      [
+        {
+          id: 'ev_1',
+          title: 'Natación',
+          startTime: '19:00',
+          endTime: '20:00',
+          daysOfWeek: [0, 2, 4],
+          category: 'swim',
+          startDateKey: '2026-11-10',
+          active: true,
+          createdAt: 1700000000000
+        }
+      ],
+      [{ date: '2026-11-10', statuses: { ev_1: 'completed' }, updatedAt: 1700000000000 }]
+    );
+
+    const v3Result = validateAndNormalizeBackupJson(JSON.stringify(v3Payload));
+    expect(v3Result.valid).toBe(true);
+    expect(v3Result.checksumVerified).toBe(true);
+    expect(v3Result.payload?.scheduleEvents).toHaveLength(1);
+    expect(v3Result.payload?.scheduleAttendance?.[0].statuses.ev_1).toBe('completed');
+
+    // Retrocompatibilidad v2 sin scheduleEvents/scheduleAttendance
+    const v2Base = {
+      version: 2,
+      logs: sampleLogs,
+      exercises: sampleExercises,
+      bodyweight: sampleBodyweight,
+      settings: sampleSettings
+    };
+    const v2Json = JSON.stringify({
+      ...v2Base,
+      exportedAt: '2026-11-13T10:00:00.000Z',
+      checksum: computeIntegrityChecksum(v2Base)
+    });
+    const v2Result = validateAndNormalizeBackupJson(v2Json);
+    expect(v2Result.valid).toBe(true);
+    expect(v2Result.checksumVerified).toBe(true);
+    expect(v2Result.payload?.scheduleEvents).toEqual([]);
+  });
 });

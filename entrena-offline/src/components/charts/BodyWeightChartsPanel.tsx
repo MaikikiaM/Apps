@@ -7,6 +7,7 @@ import { BodyWeightEntry, DailyWorkoutLog } from '../../types/models';
 import { ChartConfiguration } from 'chart.js';
 import { formatWeightKg, formatNumberWithSign } from '../../utils/formatters';
 import { normalizeStrengthEntry } from '../../math/progressionEngine';
+import { formatChartSpanishDate, formatSpanishDateShortYear } from '../../utils/dates';
 
 interface BodyWeightChartsPanelProps {
   bodyWeights: BodyWeightEntry[];
@@ -26,7 +27,7 @@ export const BodyWeightChartsPanel: React.FC<BodyWeightChartsPanelProps> = ({
   const deltaWeight = initialWeight !== null && currentWeight !== null ? currentWeight - initialWeight : null;
 
   const weightChartConfig: ChartConfiguration = useMemo(() => {
-    const labels = sortedBw.map(bw => bw.date.slice(2));
+    const labels = sortedBw.map(bw => formatSpanishDateShortYear(bw.date));
     const data = sortedBw.map(bw => bw.weightKg);
 
     return {
@@ -74,7 +75,7 @@ export const BodyWeightChartsPanel: React.FC<BodyWeightChartsPanelProps> = ({
     return {
       type: 'line',
       data: {
-        labels: pullupDays.map(d => d.date.slice(5)),
+        labels: pullupDays.map(d => formatChartSpanishDate(d.date)),
         datasets: [
           {
             label: 'Reps Máx Dominadas',

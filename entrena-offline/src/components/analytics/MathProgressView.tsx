@@ -9,7 +9,7 @@ import { ChartCanvas } from '../common/ChartCanvas';
 import { ChartConfiguration } from 'chart.js';
 import { formatPercent, formatNumberWithSign, formatDurationMmSs, formatMeters, formatWeightKg } from '../../utils/formatters';
 import { computePersonalRecords } from '../../utils/stats';
-import { formatShortSpanishDate, daysBetween, toLocalDateKey } from '../../utils/dates';
+import { formatShortSpanishDate, formatChartSpanishDate, daysBetween, toLocalDateKey } from '../../utils/dates';
 
 export const MathProgressView: React.FC = () => {
   const { logs, exercises, bodyWeights, selectedDateKey } = useAppData();
@@ -30,7 +30,7 @@ export const MathProgressView: React.FC = () => {
       return { type: 'line', data: { labels: [], datasets: [] } };
     }
 
-    const labels = snapshots.map(s => s.date.slice(5));
+    const labels = snapshots.map(s => formatChartSpanishDate(s.date));
     const data = snapshots.map(s => s.iga);
 
     const datasets: ChartConfiguration['data']['datasets'] = [
@@ -87,7 +87,7 @@ export const MathProgressView: React.FC = () => {
       return { type: 'line', data: { labels: [], datasets: [] } };
     }
 
-    const labels = snapshots.map(s => s.date.slice(5));
+    const labels = snapshots.map(s => formatChartSpanishDate(s.date));
 
     return {
       type: 'line',

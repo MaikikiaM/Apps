@@ -8,6 +8,10 @@ import {
   DailyWorkoutLog,
   ExerciseDefinition,
   SafetySnapshot,
+  ScheduleCategory,
+  ScheduleCheckStatus,
+  ScheduleDayRecord,
+  ScheduleEvent,
   StrengthEntry,
   SwimSession
 } from '../types/models';
@@ -80,13 +84,20 @@ export function exportNativeToDownloads(filename: string, json: string): string 
  * Hash determinista FNV-1a 32-bit x2 (64-bit hex) para verificar integridad sin dependencias externas.
  */
 export function computeIntegrityChecksum(payload: Omit<BackupPayload, 'checksum' | 'exportedAt'>): string {
-  const canonical = JSON.stringify({
+  const baseObj: Record<string, unknown> = {
     version: payload.version,
     logs: [...payload.logs].sort((a, b) => a.date.localeCompare(b.date)),
     exercises: [...payload.exercises].sort((a, b) => a.id.localeCompare(b.id)),
     bodyweight: [...payload.bodyweight].sort((a, b) => a.date.localeCompare(b.date)),
     settings: payload.settings
-  });
+  };
+
+  if (payload.version >= 3 || payload.scheduleEvents !== undefined || payload.scheduleAttendance !== undefined) {
+    baseObj.scheduleEvents = [...(payload.scheduleEvents || [])].sort((a, b) => a.id.localeCompare(b.id));
+    baseObj.scheduleAttendance = [...(payload.scheduleAttendance || [])].sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  const canonical = JSON.stringify(baseObj);
 
   let h1 = 0x811c9dc5;
   let h2 = 0x811c9dc5 ^ canonical.length;
@@ -107,14 +118,18 @@ export function buildVerifiedBackupPayload(
   logs: DailyWorkoutLog[],
   exercises: ExerciseDefinition[],
   bodyweight: BodyWeightEntry[],
-  settings: AppSettings
+  settings: AppSettings,
+  scheduleEvents: ScheduleEvent[] = [],
+  scheduleAttendance: ScheduleDayRecord[] = []
 ): BackupPayload {
   const base = {
-    version: 2,
+    version: 3,
     logs,
     exercises,
     bodyweight,
-    settings
+    settings,
+    scheduleEvents,
+    scheduleAttendance
   };
   return {
     ...base,
@@ -215,12 +230,19 @@ export function validateAndNormalizeBackupJson(jsonStr: string): ValidationResul
   // Verificar checksum si viene en copias v2+
   let checksumVerified = false;
   if (typeof raw.checksum === 'string' && raw.checksum.startsWith('fnv-')) {
-    const candidateBase = {
-      version: typeof raw.version === 'number' ? raw.version : 2,
+    const versionNum = typeof raw.version === 'number' ? raw.version : 2;
+    const candidateBase: Omit<BackupPayload, 'checksum' | 'exportedAt'> = {
+      version: versionNum,
       logs: raw.logs as DailyWorkoutLog[],
       exercises: (Array.isArray(raw.exercises) ? raw.exercises : INITIAL_EXERCISES) as ExerciseDefinition[],
       bodyweight: (Array.isArray(raw.bodyweight) ? raw.bodyweight : []) as BodyWeightEntry[],
-      settings: (raw.settings && typeof raw.settings === 'object' ? raw.settings : { poolLengthDefault: 25 }) as AppSettings
+      settings: (raw.settings && typeof raw.settings === 'object' ? raw.settings : { poolLengthDefault: 25 }) as AppSettings,
+      ...(versionNum >= 3 || raw.scheduleEvents !== undefined || raw.scheduleAttendance !== undefined
+        ? {
+            scheduleEvents: Array.isArray(raw.scheduleEvents) ? (raw.scheduleEvents as ScheduleEvent[]) : [],
+            scheduleAttendance: Array.isArray(raw.scheduleAttendance) ? (raw.scheduleAttendance as ScheduleDayRecord[]) : []
+          }
+        : {})
     };
     const expected = computeIntegrityChecksum(candidateBase);
     if (expected !== raw.checksum) {
@@ -307,19 +329,76 @@ export function validateAndNormalizeBackupJson(jsonStr: string): ValidationResul
     ...(typeof rawSettings.restTimerDefaultSeconds === 'number' ? { restTimerDefaultSeconds: Math.max(15, rawSettings.restTimerDefaultSeconds) } : {})
   };
 
+  // Normalizar horario recurrente (v3+)
+  const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
+  const VALID_CATEGORIES: ScheduleCategory[] = ['swim', 'strength', 'study', 'habit', 'other'];
+  const evMap = new Map<string, ScheduleEvent>();
+  if (Array.isArray(raw.scheduleEvents)) {
+    for (const item of raw.scheduleEvents) {
+      if (!item || typeof item !== 'object') continue;
+      const rec = item as Record<string, unknown>;
+      if (typeof rec.id !== 'string' || !rec.id.trim() || typeof rec.title !== 'string' || !rec.title.trim()) continue;
+      const days = Array.isArray(rec.daysOfWeek)
+        ? Array.from(new Set(rec.daysOfWeek.map(Number).filter(n => Number.isInteger(n) && n >= 0 && n <= 6))).sort((a, b) => a - b)
+        : [];
+      const cat = VALID_CATEGORIES.includes(rec.category as ScheduleCategory) ? (rec.category as ScheduleCategory) : 'other';
+      const createdAt = typeof rec.createdAt === 'number' && Number.isFinite(rec.createdAt) ? rec.createdAt : Date.now();
+      const startDateKey = typeof rec.startDateKey === 'string' && DATE_KEY_REGEX.test(rec.startDateKey)
+        ? rec.startDateKey
+        : new Date(createdAt).toISOString().slice(0, 10);
+      evMap.set(rec.id.trim(), {
+        id: rec.id.trim(),
+        title: rec.title.trim(),
+        startTime: typeof rec.startTime === 'string' && TIME_REGEX.test(rec.startTime) ? rec.startTime : '09:00',
+        endTime: typeof rec.endTime === 'string' && TIME_REGEX.test(rec.endTime) ? rec.endTime : '10:00',
+        daysOfWeek: days,
+        category: cat,
+        startDateKey,
+        active: rec.active !== false,
+        createdAt
+      });
+    }
+  }
+
+  // Normalizar registro diario de asistencia al horario (v3+)
+  const attMap = new Map<string, ScheduleDayRecord>();
+  if (Array.isArray(raw.scheduleAttendance)) {
+    for (const item of raw.scheduleAttendance) {
+      if (!item || typeof item !== 'object') continue;
+      const rec = item as Record<string, unknown>;
+      if (typeof rec.date !== 'string' || !DATE_KEY_REGEX.test(rec.date)) continue;
+      const rawStatuses = rec.statuses && typeof rec.statuses === 'object' ? (rec.statuses as Record<string, unknown>) : {};
+      const cleanStatuses: Record<string, ScheduleCheckStatus> = {};
+      for (const [evId, val] of Object.entries(rawStatuses)) {
+        if (val === 'completed' || val === 'missed') {
+          cleanStatuses[evId] = val;
+        }
+      }
+      attMap.set(rec.date, {
+        date: rec.date,
+        statuses: cleanStatuses,
+        updatedAt: typeof rec.updatedAt === 'number' && Number.isFinite(rec.updatedAt) ? rec.updatedAt : Date.now()
+      });
+    }
+  }
+
   const normalizedLogs = Array.from(logsMap.values()).sort((a, b) => a.date.localeCompare(b.date));
   const normalizedBw = Array.from(bwMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+  const normalizedScheduleEvents = Array.from(evMap.values());
+  const normalizedScheduleAttendance = Array.from(attMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 
   return {
     valid: true,
     checksumVerified,
     payload: {
-      version: typeof raw.version === 'number' ? raw.version : 2,
+      version: typeof raw.version === 'number' ? raw.version : 3,
       exportedAt: typeof raw.exportedAt === 'string' ? raw.exportedAt : new Date().toISOString(),
       logs: normalizedLogs,
       exercises,
       bodyweight: normalizedBw,
-      settings
+      settings,
+      scheduleEvents: normalizedScheduleEvents,
+      scheduleAttendance: normalizedScheduleAttendance
     }
   };
 }

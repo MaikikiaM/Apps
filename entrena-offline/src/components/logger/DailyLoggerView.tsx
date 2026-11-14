@@ -21,6 +21,7 @@ import { DailyWorkoutLog, SwimSession, StrengthEntry } from '../../types/models'
 import {
   formatFriendlyDate,
   formatShortSpanishDate,
+  formatSpanishDateSlash,
   addDaysToDateKey,
   toLocalDateKey,
   getWeekDateKeys
@@ -293,7 +294,7 @@ export const DailyLoggerView: React.FC = () => {
               )}
             </div>
             <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
-              {selectedDateKey}
+              {formatSpanishDateSlash(selectedDateKey)}
             </span>
           </div>
 

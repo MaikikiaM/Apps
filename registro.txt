@@ -1244,3 +1244,21 @@ SESIÓN: 13/11/2026 - BLINDAJE MULTI-CAPA DE DATOS ENTRENA-OFFLINE v1.3
   * `npm.cmd run build:apk`: `tsc -b && vite build` + compilación Java/DEX (`NativeBackupStore`, `EntrenaNativeBridge`, `MainActivity`, `OfflineWebChromeClient`, `OfflineWebViewClient`) + generación y verificación v2/v3 de `EntrenaOffline_v1.3.apk` (0.30 MB, versionCode 4).
   * Verificación en navegador móvil (`360×800`): tarjeta de blindaje, guardado manual de punto de restauración y selector de modo verificados sin errores de consola y sin desbordamiento horizontal (`scrollWidth <= clientWidth`).
 ================================================================================
+
+================================================================================
+SESIÓN: 14/11/2026 - FECHAS ESTILO ESPAÑOL Y HORARIO RECURRENTE + ACCURACY ENTRENA-OFFLINE v1.4
+================================================================================
+- Objetivo: Cambiar todas las fechas visibles al formato español (`DD/MM`, `DD/MM/AA`, `DD/MM/AAAA`) y añadir un módulo de horario semanal recurrente con checklist diario de cumplimiento y cálculo de Accuracy (% de asistencia).
+- Cambios y Soluciones Aplicadas:
+  1. Formato de Fechas Español en Toda la App (`src/utils/dates.ts`, gráficas y vistas):
+     * Añadidos `formatChartSpanishDate` (`DD/MM`), `formatSpanishDateSlash` (`DD/MM/YYYY`), `formatSpanishDateShortYear` (`DD/MM/YY`) y `getSpanishWeekdayIndex` (0=Lunes..6=Domingo).
+     * Actualizadas todas las gráficas (`SwimChartsPanel.tsx`, `StrengthChartsPanel.tsx`, `BodyWeightChartsPanel.tsx`, `MathProgressView.tsx`), el registro diario (`DailyLoggerView.tsx`), los pesajes en `SettingsView.tsx` y las etiquetas de snapshots en `database.ts`.
+  2. Horario Recurrente, Checklist Diario y Accuracy (`ScheduleView.tsx`, `scheduleStats.ts`, `models.ts`, `BottomNav.tsx`):
+     * `ScheduleView.tsx`: Nueva pestaña `Horario` en la barra inferior con 3 sub-vistas (`Check diario`, `Accuracy (%)`, `Mi Horario`). Permite crear/editar/pausar/borrar bloques horarios recurrentes con intervalo `HH:MM–HH:MM`, categoría, días L–D y fecha de inicio; marcar cada día `Cumplido` / `No cumplido` o `Todos ✓`; consultar % global, rachas al 100%, gráfica de evolución diaria (`DD/MM`) y desglose individual por evento con filtros (`7d`, `30d`, `90d`, `Todo`).
+  3. Persistencia y Blindaje Multi-Capa v3 (`database.ts`, `storageGuard.ts`, `useAppData.tsx`):
+     * `IndexedDB v3` (`schedule_events` y `schedule_attendance`), integración completa en `BackupPayload` v3, checksums FNV-1a (manteniendo compatibilidad retroactiva con copias v1/v2), fusión/reemplazo en importación, snapshots preventivos, espejo localStorage y respaldo atómico Android (`NativeBackupStore`).
+- Verificación:
+  * `npm.cmd test`: 22/22 pruebas Vitest pasadas en 4 archivos (`storageGuard.test.ts` 7, `scheduleStats.test.ts` 3, `progressionEngine.test.ts` 7, `stats.test.ts` 5).
+  * `npm.cmd run build:apk`: `tsc -b && vite build` + generación y firma v2/v3 de `EntrenaOffline_v1.4.apk` (0.31 MB, `versionCode="5"`).
+  * Inspección móvil en vivo (`360×800`): 0 errores de consola, `scrollWidth <= clientWidth` en las 6 pestañas, etiquetas de gráficas en `DD/MM`, marcado diario de cumplimiento, gráfica de Accuracy y creación de evento recurrente verificados.
+================================================================================

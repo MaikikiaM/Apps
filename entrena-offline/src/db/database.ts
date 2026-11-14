@@ -8,10 +8,13 @@ import {
   BodyWeightEntry,
   AppSettings,
   SafetySnapshot,
+  ScheduleDayRecord,
+  ScheduleEvent,
   StorageHealthInfo
 } from '../types/models';
 import { INITIAL_EXERCISES } from './seedExercises';
-import { toLocalDateKey, addDaysToDateKey } from '../utils/dates';
+import { toLocalDateKey, addDaysToDateKey, formatSpanishDateSlash, getSpanishWeekdayIndex } from '../utils/dates';
+import { sortScheduleEvents } from '../utils/scheduleStats';
 import {
   buildVerifiedBackupPayload,
   exportNativeToDownloads,
@@ -50,10 +53,18 @@ interface WorkoutDB extends DBSchema {
     key: string; // id
     value: SafetySnapshot;
   };
+  schedule_events: {
+    key: string; // id
+    value: ScheduleEvent;
+  };
+  schedule_attendance: {
+    key: string; // 'YYYY-MM-DD'
+    value: ScheduleDayRecord;
+  };
 }
 
 const DB_NAME = 'workout-tracker-db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const MAX_IDB_SNAPSHOTS = 12;
 
 let dbPromise: Promise<IDBPDatabase<WorkoutDB>> | null = null;
@@ -78,6 +89,12 @@ export async function getDb(): Promise<IDBPDatabase<WorkoutDB>> {
           }
           if (!upgradeDb.objectStoreNames.contains('snapshots')) {
             upgradeDb.createObjectStore('snapshots', { keyPath: 'id' });
+          }
+          if (!upgradeDb.objectStoreNames.contains('schedule_events')) {
+            upgradeDb.createObjectStore('schedule_events', { keyPath: 'id' });
+          }
+          if (!upgradeDb.objectStoreNames.contains('schedule_attendance')) {
+            upgradeDb.createObjectStore('schedule_attendance', { keyPath: 'date' });
           }
         },
         blocked() {
@@ -128,13 +145,15 @@ export async function syncDurableBackupNow(): Promise<boolean> {
       const db = await getDb();
       const logsCount = await db.count('logs');
       const bwCount = await db.count('bodyweight');
-      if (logsCount > 0 || bwCount > 0) {
-        const todaySnapshotId = `daily_${toLocalDateKey(new Date())}`;
+      const evCount = await db.count('schedule_events');
+      if (logsCount > 0 || bwCount > 0 || evCount > 0) {
+        const todayKey = toLocalDateKey(new Date());
+        const todaySnapshotId = `daily_${todayKey}`;
         const existingToday = await db.get('snapshots', todaySnapshotId);
         if (!existingToday) {
           const snap: SafetySnapshot = {
             id: todaySnapshotId,
-            label: `Auto-guardado diario (${toLocalDateKey(new Date())})`,
+            label: `Auto-guardado diario (${formatSpanishDateSlash(todayKey)})`,
             createdAt: Date.now(),
             logsCount,
             bodyWeightsCount: bwCount,
@@ -191,18 +210,27 @@ async function putSnapshotWithPruning(db: IDBPDatabase<WorkoutDB>, snap: SafetyS
 
 export async function createSafetySnapshot(label: string, force = false): Promise<SafetySnapshot | null> {
   const db = await getDb();
-  const [logs, exercises, bodyweight, settings] = await Promise.all([
+  const [logs, exercises, bodyweight, settings, scheduleEvents, scheduleAttendance] = await Promise.all([
     getAllLogs(),
     getAllExercises(),
     getAllBodyWeights(),
-    getSettings()
+    getSettings(),
+    getAllScheduleEvents(),
+    getAllScheduleAttendance()
   ]);
 
-  if (!force && logs.length === 0 && bodyweight.length === 0) {
+  if (!force && logs.length === 0 && bodyweight.length === 0 && scheduleEvents.length === 0) {
     return null;
   }
 
-  const payload = buildVerifiedBackupPayload(logs, exercises, bodyweight, settings);
+  const payload = buildVerifiedBackupPayload(
+    logs,
+    exercises,
+    bodyweight,
+    settings,
+    scheduleEvents,
+    scheduleAttendance
+  );
   const json = JSON.stringify(payload, null, 2);
 
   const snap: SafetySnapshot = {
@@ -251,8 +279,9 @@ export async function recoverDataIfNeeded(): Promise<RecoveryReport> {
     const db = await getDb();
     const logsCount = await db.count('logs');
     const bwCount = await db.count('bodyweight');
+    const evCount = await db.count('schedule_events');
 
-    if (logsCount > 0 || bwCount > 0) {
+    if (logsCount > 0 || bwCount > 0 || evCount > 0) {
       // Hay datos vivos en IndexedDB: asegurar que los espejos estén sincronizados
       if (!loadShadowMirror() || (isNativeBridgeAvailable() && !loadFromNativeStore())) {
         void syncDurableBackupNow();
@@ -275,7 +304,9 @@ export async function recoverDataIfNeeded(): Promise<RecoveryReport> {
       if (
         validation.valid &&
         validation.payload &&
-        (validation.payload.logs.length > 0 || validation.payload.bodyweight.length > 0)
+        (validation.payload.logs.length > 0 ||
+          validation.payload.bodyweight.length > 0 ||
+          (validation.payload.scheduleEvents?.length || 0) > 0)
       ) {
         const res = await applyValidatedBackup(validation.payload, 'replace', false);
         if (res.success) {
@@ -372,6 +403,43 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
   scheduleDurableBackupSync();
 }
 
+// --- CRUD HORARIO RECURRENTE Y ASISTENCIA ---
+
+export async function getAllScheduleEvents(): Promise<ScheduleEvent[]> {
+  const db = await getDb();
+  const list = await db.getAll('schedule_events');
+  return sortScheduleEvents(list);
+}
+
+export async function saveScheduleEvent(event: ScheduleEvent): Promise<void> {
+  const db = await getDb();
+  markIntentionalClear(false);
+  await db.put('schedule_events', event);
+  scheduleDurableBackupSync();
+}
+
+export async function deleteScheduleEvent(id: string): Promise<void> {
+  const db = await getDb();
+  await db.delete('schedule_events', id);
+  scheduleDurableBackupSync();
+}
+
+export async function getAllScheduleAttendance(): Promise<ScheduleDayRecord[]> {
+  const db = await getDb();
+  const list = await db.getAll('schedule_attendance');
+  return list.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export async function saveScheduleDayAttendance(record: ScheduleDayRecord): Promise<void> {
+  const db = await getDb();
+  markIntentionalClear(false);
+  await db.put('schedule_attendance', {
+    ...record,
+    updatedAt: Date.now()
+  });
+  scheduleDurableBackupSync();
+}
+
 // --- ESTADO DE PROTECCIÓN DE DATOS ---
 
 export async function getStorageHealthInfo(): Promise<StorageHealthInfo> {
@@ -386,12 +454,14 @@ export async function getStorageHealthInfo(): Promise<StorageHealthInfo> {
 
   let totalLogs = 0;
   let totalBodyWeights = 0;
+  let totalScheduleEvents = 0;
   let snapshotsCount = 0;
   try {
     const db = await getDb();
-    [totalLogs, totalBodyWeights] = await Promise.all([
+    [totalLogs, totalBodyWeights, totalScheduleEvents] = await Promise.all([
       db.count('logs'),
-      db.count('bodyweight')
+      db.count('bodyweight'),
+      db.count('schedule_events')
     ]);
     snapshotsCount = (await getAllSafetySnapshots()).length;
   } catch {
@@ -405,21 +475,31 @@ export async function getStorageHealthInfo(): Promise<StorageHealthInfo> {
     lastBackupAt: getLastBackupTimestamp(),
     snapshotsCount,
     totalLogs,
-    totalBodyWeights
+    totalBodyWeights,
+    totalScheduleEvents
   };
 }
 
 // --- BACKUP Y RESTAURACIÓN JSON ---
 
 export async function exportDataAsJson(): Promise<string> {
-  const [logs, exercises, bodyweight, settings] = await Promise.all([
+  const [logs, exercises, bodyweight, settings, scheduleEvents, scheduleAttendance] = await Promise.all([
     getAllLogs(),
     getAllExercises(),
     getAllBodyWeights(),
-    getSettings()
+    getSettings(),
+    getAllScheduleEvents(),
+    getAllScheduleAttendance()
   ]);
 
-  const payload = buildVerifiedBackupPayload(logs, exercises, bodyweight, settings);
+  const payload = buildVerifiedBackupPayload(
+    logs,
+    exercises,
+    bodyweight,
+    settings,
+    scheduleEvents,
+    scheduleAttendance
+  );
   return JSON.stringify(payload, null, 2);
 }
 
@@ -440,10 +520,12 @@ async function applyValidatedBackup(
   }
 
   if (mode === 'merge') {
-    const [existingLogs, existingEx, existingBw] = await Promise.all([
+    const [existingLogs, existingEx, existingBw, existingEvents, existingAttendance] = await Promise.all([
       getAllLogs(),
       getAllExercises(),
-      getAllBodyWeights()
+      getAllBodyWeights(),
+      getAllScheduleEvents(),
+      getAllScheduleAttendance()
     ]);
 
     const mergedLogs = new Map(existingLogs.map(l => [l.date, l]));
@@ -470,7 +552,25 @@ async function applyValidatedBackup(
       }
     }
 
-    const tx = db.transaction(['logs', 'exercises', 'bodyweight'], 'readwrite');
+    const mergedEvents = new Map(existingEvents.map(ev => [ev.id, ev]));
+    for (const ev of payload.scheduleEvents || []) {
+      if (!mergedEvents.has(ev.id)) {
+        mergedEvents.set(ev.id, ev);
+      }
+    }
+
+    const mergedAttendance = new Map(existingAttendance.map(rec => [rec.date, rec]));
+    for (const rec of payload.scheduleAttendance || []) {
+      const prev = mergedAttendance.get(rec.date);
+      if (!prev || rec.updatedAt >= prev.updatedAt) {
+        mergedAttendance.set(rec.date, rec);
+      }
+    }
+
+    const tx = db.transaction(
+      ['logs', 'exercises', 'bodyweight', 'schedule_events', 'schedule_attendance'],
+      'readwrite'
+    );
     for (const log of mergedLogs.values()) {
       await tx.objectStore('logs').put(log);
     }
@@ -479,6 +579,12 @@ async function applyValidatedBackup(
     }
     for (const bw of mergedBw.values()) {
       await tx.objectStore('bodyweight').put(bw);
+    }
+    for (const ev of mergedEvents.values()) {
+      await tx.objectStore('schedule_events').put(ev);
+    }
+    for (const rec of mergedAttendance.values()) {
+      await tx.objectStore('schedule_attendance').put(rec);
     }
     await tx.done;
 
@@ -491,10 +597,15 @@ async function applyValidatedBackup(
   }
 
   // Modo 'replace' atómico
-  const tx = db.transaction(['logs', 'exercises', 'bodyweight', 'settings'], 'readwrite');
+  const tx = db.transaction(
+    ['logs', 'exercises', 'bodyweight', 'settings', 'schedule_events', 'schedule_attendance'],
+    'readwrite'
+  );
   await tx.objectStore('logs').clear();
   await tx.objectStore('exercises').clear();
   await tx.objectStore('bodyweight').clear();
+  await tx.objectStore('schedule_events').clear();
+  await tx.objectStore('schedule_attendance').clear();
 
   for (const log of payload.logs) {
     await tx.objectStore('logs').put(log);
@@ -504,6 +615,12 @@ async function applyValidatedBackup(
   }
   for (const bw of payload.bodyweight) {
     await tx.objectStore('bodyweight').put(bw);
+  }
+  for (const ev of payload.scheduleEvents || []) {
+    await tx.objectStore('schedule_events').put(ev);
+  }
+  for (const rec of payload.scheduleAttendance || []) {
+    await tx.objectStore('schedule_attendance').put(rec);
   }
   if (payload.settings) {
     await tx.objectStore('settings').put(payload.settings, 'app_settings');
@@ -541,10 +658,15 @@ export async function importDataFromJson(
 export async function clearAllData(): Promise<void> {
   await createSafetySnapshot('Antes de vaciar datos');
   const db = await getDb();
-  const tx = db.transaction(['logs', 'exercises', 'bodyweight'], 'readwrite');
+  const tx = db.transaction(
+    ['logs', 'exercises', 'bodyweight', 'schedule_events', 'schedule_attendance'],
+    'readwrite'
+  );
   await tx.objectStore('logs').clear();
   await tx.objectStore('exercises').clear();
   await tx.objectStore('bodyweight').clear();
+  await tx.objectStore('schedule_events').clear();
+  await tx.objectStore('schedule_attendance').clear();
   for (const ex of INITIAL_EXERCISES) {
     await tx.objectStore('exercises').put(ex);
   }
@@ -687,6 +809,71 @@ export async function seedDemoData(): Promise<void> {
   }
 
   await txLogs.done;
+
+  // Demo de horario semanal y asistencia (últimos 21 días)
+  const d21 = addDaysToDateKey(todayKey, -20);
+  const demoScheduleEvents: ScheduleEvent[] = [
+    {
+      id: 'demo_swim_block',
+      title: 'Natación (piscina)',
+      startTime: '19:00',
+      endTime: '20:00',
+      daysOfWeek: [0, 2, 4], // L-X-V
+      category: 'swim',
+      startDateKey: d21,
+      active: true,
+      createdAt: Date.now()
+    },
+    {
+      id: 'demo_strength_block',
+      title: 'Calistenia / Pesas',
+      startTime: '18:00',
+      endTime: '19:00',
+      daysOfWeek: [1, 3, 5], // M-J-S
+      category: 'strength',
+      startDateKey: d21,
+      active: true,
+      createdAt: Date.now()
+    },
+    {
+      id: 'demo_mobility_block',
+      title: 'Movilidad y Estiramientos',
+      startTime: '21:30',
+      endTime: '21:50',
+      daysOfWeek: [0, 1, 2, 3, 4, 5, 6], // Todos los días
+      category: 'habit',
+      startDateKey: d21,
+      active: true,
+      createdAt: Date.now()
+    }
+  ];
+
+  const txSched = db.transaction(['schedule_events', 'schedule_attendance'], 'readwrite');
+  await txSched.objectStore('schedule_events').clear();
+  await txSched.objectStore('schedule_attendance').clear();
+
+  for (const ev of demoScheduleEvents) {
+    await txSched.objectStore('schedule_events').put(ev);
+  }
+
+  for (let offset = 20; offset >= 1; offset--) {
+    const dk = addDaysToDateKey(todayKey, -offset);
+    const wd = getSpanishWeekdayIndex(dk);
+    const statuses: Record<string, 'completed' | 'missed'> = {};
+    for (const ev of demoScheduleEvents) {
+      if (ev.daysOfWeek.includes(wd)) {
+        const missed = (offset + ev.title.length) % 6 === 0;
+        statuses[ev.id] = missed ? 'missed' : 'completed';
+      }
+    }
+    await txSched.objectStore('schedule_attendance').put({
+      date: dk,
+      statuses,
+      updatedAt: Date.now()
+    });
+  }
+  await txSched.done;
+
   markIntentionalClear(false);
   await syncDurableBackupNow();
 }

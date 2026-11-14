@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { useAppData } from '../../db/useAppData';
 import { ExerciseDefinition, ExerciseCategory, BodyWeightEntry, SafetySnapshot } from '../../types/models';
-import { toLocalDateKey, formatFriendlyDate } from '../../utils/dates';
+import { toLocalDateKey, formatFriendlyDate, formatSpanishDateSlash } from '../../utils/dates';
 import { exportDataAsJson, exportBackupToDeviceDownloads, importDataFromJson } from '../../db/database';
 import { formatWeightKg } from '../../utils/formatters';
 
@@ -316,7 +316,7 @@ export const SettingsView: React.FC = () => {
         </div>
 
         <p style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.4 }}>
-          Cada cambio se guarda con validación estricta y checksum de integridad en IndexedDB, en el espejo local y, en la app Android, en archivo atómico externo al WebView (`entrena_backup_v1.json` + `.bak`).
+          Cada cambio se guarda con validación estricta y checksum de integridad en IndexedDB, en el espejo local y, en la app Android, en archivo atómico externo al WebView (<code>entrena_state.json</code> + <code>.bak</code>).
         </p>
 
         {/* Exportar e Importar */}
@@ -598,7 +598,7 @@ export const SettingsView: React.FC = () => {
                       {formatWeightKg(bw.weightKg)}
                     </span>
                     <span style={{ fontSize: '0.74rem', color: '#94a3b8' }}>
-                      {formatFriendlyDate(bw.date)} ({bw.date})
+                      {formatFriendlyDate(bw.date)} ({formatSpanishDateSlash(bw.date)})
                     </span>
                   </div>
                   {bw.notes && (

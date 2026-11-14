@@ -104,6 +104,28 @@ export interface MetricProjection {
   dataPointsCount: number;
 }
 
+export type ScheduleCategory = 'swim' | 'strength' | 'study' | 'habit' | 'other';
+
+export type ScheduleCheckStatus = 'completed' | 'missed';
+
+export interface ScheduleEvent {
+  id: string;
+  title: string;
+  startTime: string;             // Formato "HH:MM" (ej. "18:30")
+  endTime: string;               // Formato "HH:MM" (ej. "19:45")
+  daysOfWeek: number[];          // 0=Lun, 1=Mar, 2=Mié, 3=Jue, 4=Vie, 5=Sáb, 6=Dom
+  category: ScheduleCategory;
+  startDateKey: string;          // 'YYYY-MM-DD' desde cuándo cuenta en Accuracy
+  active: boolean;
+  createdAt: number;
+}
+
+export interface ScheduleDayRecord {
+  date: string;                  // 'YYYY-MM-DD'
+  statuses: Record<string, ScheduleCheckStatus>; // eventId -> 'completed' | 'missed'
+  updatedAt: number;
+}
+
 export interface BackupPayload {
   version: number;
   exportedAt: string;
@@ -112,6 +134,8 @@ export interface BackupPayload {
   exercises: ExerciseDefinition[];
   bodyweight: BodyWeightEntry[];
   settings: AppSettings;
+  scheduleEvents?: ScheduleEvent[];
+  scheduleAttendance?: ScheduleDayRecord[];
 }
 
 export interface SafetySnapshot {
@@ -131,4 +155,5 @@ export interface StorageHealthInfo {
   snapshotsCount: number;
   totalLogs: number;
   totalBodyWeights: number;
+  totalScheduleEvents?: number;
 }

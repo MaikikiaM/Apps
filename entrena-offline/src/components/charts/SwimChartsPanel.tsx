@@ -6,6 +6,7 @@ import { ChartCanvas } from '../common/ChartCanvas';
 import { DailyWorkoutLog } from '../../types/models';
 import { ChartConfiguration } from 'chart.js';
 import { formatDurationMmSs, formatDurationHuman, formatMeters } from '../../utils/formatters';
+import { formatChartSpanishDate } from '../../utils/dates';
 
 interface SwimChartsPanelProps {
   logs: DailyWorkoutLog[];
@@ -47,7 +48,7 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
     };
   }, [swimLogs]);
 
-  const labels = useMemo(() => swimLogs.map(l => l.date.slice(5)), [swimLogs]);
+  const labels = useMemo(() => swimLogs.map(l => formatChartSpanishDate(l.date)), [swimLogs]);
 
   // 1. Gráfica de Metros Totales + Proyección
   const totalMetersConfig: ChartConfiguration = useMemo(() => {
@@ -208,7 +209,7 @@ export const SwimChartsPanel: React.FC<SwimChartsPanelProps> = ({ logs, showProj
   // 4. Gráfica de Tiempos y Ritmo /100m
   const paceConfig: ChartConfiguration = useMemo(() => {
     const validPaceLogs = swimLogs.filter(l => l.swim!.durationSeconds > 0 && l.swim!.totalMeters > 0);
-    const paceLabels = validPaceLogs.map(l => l.date.slice(5));
+    const paceLabels = validPaceLogs.map(l => formatChartSpanishDate(l.date));
     const paceSecs = validPaceLogs.map(l => (l.swim!.durationSeconds / l.swim!.totalMeters) * 100);
 
     return {

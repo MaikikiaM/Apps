@@ -1,8 +1,8 @@
 // src/components/layout/BottomNav.tsx
 import React from 'react';
-import { PenSquare, Calendar, LineChart, BrainCircuit, Settings } from 'lucide-react';
+import { PenSquare, Clock, Calendar, LineChart, BrainCircuit, Settings } from 'lucide-react';
 
-export type ActiveTab = 'logger' | 'calendar' | 'charts' | 'math' | 'settings';
+export type ActiveTab = 'logger' | 'schedule' | 'calendar' | 'charts' | 'math' | 'settings';
 
 interface BottomNavProps {
   activeTab: ActiveTab;
@@ -18,7 +18,16 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onTabChange }) 
         aria-label="Registrar"
       >
         <PenSquare className="bottom-nav-icon" />
-        <span>Registrar</span>
+        <span>Entreno</span>
+      </button>
+
+      <button
+        className={`bottom-nav-item ${activeTab === 'schedule' ? 'active' : ''}`}
+        onClick={() => onTabChange('schedule')}
+        aria-label="Horario"
+      >
+        <Clock className="bottom-nav-icon" />
+        <span>Horario</span>
       </button>
 
       <button
@@ -27,7 +36,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onTabChange }) 
         aria-label="Calendario"
       >
         <Calendar className="bottom-nav-icon" />
-        <span>Calendario</span>
+        <span>Agenda</span>
       </button>
 
       <button

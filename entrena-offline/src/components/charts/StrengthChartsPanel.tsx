@@ -7,6 +7,7 @@ import { DailyWorkoutLog, ExerciseDefinition } from '../../types/models';
 import { ChartConfiguration } from 'chart.js';
 import { normalizeStrengthEntry } from '../../math/progressionEngine';
 import { formatWeightKg } from '../../utils/formatters';
+import { formatChartSpanishDate } from '../../utils/dates';
 
 interface StrengthChartsPanelProps {
   category: 'calisthenics' | 'weights';
@@ -88,7 +89,7 @@ export const StrengthChartsPanel: React.FC<StrengthChartsPanelProps> = ({
     };
   }, [exerciseHistory]);
 
-  const labels = useMemo(() => exerciseHistory.map(h => h.date.slice(5)), [exerciseHistory]);
+  const labels = useMemo(() => exerciseHistory.map(h => formatChartSpanishDate(h.date)), [exerciseHistory]);
 
   const chartAConfig: ChartConfiguration = useMemo(() => {
     if (isWeights) {

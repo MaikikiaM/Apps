@@ -88,6 +88,33 @@ export function formatShortSpanishDate(key: string): string {
   return `${d.getDate()} ${months[d.getMonth()]}`;
 }
 
+// Formato español para gráficas '14/11' (DD/MM)
+export function formatChartSpanishDate(key: string): string {
+  const parts = key.split('-');
+  if (parts.length !== 3) return key;
+  return `${parts[2]}/${parts[1]}`;
+}
+
+// Formato español numérico completo '14/11/2026' (DD/MM/YYYY)
+export function formatSpanishDateSlash(key: string): string {
+  const parts = key.split('-');
+  if (parts.length !== 3) return key;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+}
+
+// Formato español numérico corto con año '14/11/26' (DD/MM/YY)
+export function formatSpanishDateShortYear(key: string): string {
+  const parts = key.split('-');
+  if (parts.length !== 3) return key;
+  return `${parts[2]}/${parts[1]}/${parts[0].slice(-2)}`;
+}
+
+// Devuelve índice de día de la semana estilo español: 0 = Lunes ... 6 = Domingo
+export function getSpanishWeekdayIndex(key: string): number {
+  const d = parseLocalDateKey(key);
+  return (d.getDay() + 6) % 7;
+}
+
 // Información para la cuadrícula del calendario mensual (lunes a domingo)
 export interface MonthCalendarCell {
   dateKey: string;
