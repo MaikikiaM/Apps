@@ -1122,6 +1122,9 @@ ACTUALIZACIÓN CRÍTICA FORENSE v1.8.4 (07/11/2026 - 19:55):
 ================================================================================
 SESIÓN: 13/11/2026 - V1.8.5 EXACTITUD ESTRICTA POR CANCIÓN Y RECUPERACIÓN SEGURA
 ================================================================================
+- Prompts literales del usuario:
+  * [13/11/2026 13:52]: "Me parece a mi que la app ahora puede modificar libremente datos de escucha. Asumir de forma incorrecta en funcion de un registro o cualquier cosa datos y demas.
+El motivo por el que pienso esto es que como bien sabras antes se podia modifiar el tiempo de escucha y añadi 40 h en ese momento y me parecio mal poder hacer eso. Bueno, ahora, despues de la desaparicion de todas las canciones menos 4 por la cara y darle a una recuperacion de ellas, se recuperaron con tiempos de escucha incorrectos. Una cancion, por ejemplo, tenia 52 horas de escucha (cuando el total de todas no supoera las 100 horas), lo cual es imposible. Investiga esto y arreglalo que es un puto desastre ahora mismo el tema de las estadisticas. Hace falta un registro de las horas de cada cancion añadida o por añadir impecable y que de ninguna forma varíe. Es importantisimo"
 - Versión: v1.8.5 (Build #77, versionCode 27)
 - Cambios y Soluciones Aplicadas:
   1. Eliminación de Contaminación Cruzada por Subcadenas en Estadísticas:
@@ -1143,6 +1146,9 @@ SESIÓN: 13/11/2026 - V1.8.5 EXACTITUD ESTRICTA POR CANCIÓN Y RECUPERACIÓN SEG
 ================================================================================
 SESIÓN: 13/11/2026 - V1.8.6 BLINDAJE ATÓMICO, AISLAMIENTO TOTAL Y COPIA NATIVA DURABLE
 ================================================================================
+- Prompts literales del usuario:
+  * [13/11/2026 14:17]: "Con esto no deberia repetirse el error nunca mas?"
+  * [13/11/2026 14:19]: "A ver, lo suyo seria que quede todo perfecto, asi que dejalo todo perfecto lol /boost"
 - Versión: v1.8.6 (Build #78, versionCode 28)
 - Artefacto publicado: SpotiLocal_v1.8.6.apk (7,522,824 bytes, espejado a SpotiLocal.apk)
 - Cambios y Soluciones Aplicadas:
@@ -1168,6 +1174,8 @@ SESIÓN: 13/11/2026 - V1.8.6 BLINDAJE ATÓMICO, AISLAMIENTO TOTAL Y COPIA NATIVA
 ================================================================================
 SESIÓN: 13/11/2026 - V1.8.7 AUDITORÍA ESCÉPTICA INTEGRAL, TRANSACCIONES ATÓMICAS Y BLINDAJE NATIVO
 ================================================================================
+- Prompts literales del usuario:
+  * [13/11/2026 14:19]: "A ver, lo suyo seria que quede todo perfecto, asi que dejalo todo perfecto lol /boost" (segunda iteración y auditoría final v1.8.7 del mismo impulso)
 - Versión: v1.8.7 (Build #79, versionCode 29)
 - Artefacto publicado: SpotiLocal_v1.8.7.apk (7,527,964 bytes, SHA-256 1958B716BF7AA3F2CACFD1DAB26BF9C686FE202817446E18A67ECF89FC66123D, espejado a SpotiLocal.apk)
 - Cambios y Soluciones Aplicadas:
@@ -1192,6 +1200,9 @@ SESIÓN: 13/11/2026 - V1.8.7 AUDITORÍA ESCÉPTICA INTEGRAL, TRANSACCIONES ATÓM
 ================================================================================
 SESIÓN: 13/11/2026 - SINCRONIZACIÓN SPOTILOCAL v1.8.5-v1.8.7 AL MONORREPO APPS
 ================================================================================
+- Prompts literales del usuario:
+  * [13/11/2026 15:42]: "Donde estas guardando las versiones nuevas? He hecho un cambio de todo el directorio de archivos e igual te has equivocado"
+  * [13/11/2026 16:01]: "Pero el proyecto "Apps" en el que estamos hablando ya esta en el directorio, no entiendo qué va a cambiar en proximas sesiones abrir directamente algo. Btw, sincronizalo, si"
 - Acción: Migración y sincronización de cambios desde 'C:\Users\migue\Proyectos IA varios\SpotiLocal' hacia 'C:\Users\migue\Antigravity\Apps\spotilocal'.
 - Detalles:
   * Copiados y verificados por SHA-256 los 30 archivos modificados/nuevos (web, manifests, nativos Java/Gradle, tests JS/Java, documentación y APKs v1.8.5, v1.8.6, v1.8.7 y SpotiLocal.apk), preservando 'spotilocal/package_apk.ps1' adaptado a Apps.
@@ -1346,4 +1357,16 @@ SESIÓN: 15/11/2026 - ORDEN DE EVENTOS POR DÍAS (L-D) Y ENTONCES HORAS v1.8
   * `npm.cmd test`: 23/23 pruebas Vitest pasadas en 4 archivos.
   * `npm.cmd run build:apk`: `tsc -b && vite build` + generación y firma v2/v3 de `EntrenaOffline_v1.8.apk` (0.31 MB).
   * Inspección móvil en vivo (`360×800`): Comprobado que `Madrugón Martes` (`M · 07:00 – 07:45`) se ordena después de todos los eventos de Lunes (`21:30`) y antes de `Calistenia / Pesas` (`M · J · S · 18:00 – 19:00`), sin errores de consola ni scroll horizontal.
+================================================================================
+
+================================================================================
+SESIÓN: 15/11/2026 - NORMALIZACIÓN DE REGLAS Y REGISTRO LITERAL DE PROMPTS
+================================================================================
+- Prompts literales del usuario:
+  * [15/11/2026 00:38]: "Cometiste un error al hacer todo el tema de la reorganización, sobre todo con el registro de las cosas. Lo que están haciendo en los diferentes proyectos, que ya lo he corregido en algún proyecto como es Apps, simplemente lo que hacen es el objetivo del prompt lo resumen, el que digo yo, y lo ponen como un objetivo y entonces dicen lo que han hecho. Yo quiero que literalmente pongan se ponga lo que yo he dicho. Y si eso después que resuman el objetivo, resuman lo que he dicho, pero debe aparecer lo que he dicho yo tal cual. Y no entiendo que estén ahora haciéndolo mal cuando, por ejemplo, justamente en Apps, SpotiLocal lo registraba correctamente. Y, por ejemplo, Minecraft, aunque no he vuelto to a trabajar en ello, el proyecto de Minecraft del servidor también lo registraba tal cual, que yo sepa. Entonces, mira a ver qué pasa y actualiza todos los proyectos. Obviamente no te cargues nada."
+- Objetivo: Corregir la regresión de registro tras la reorganización del 08/11/2026 asegurando prompts literales obligatorios en `Apps` y completando las sesiones recientes de `SpotiLocal`.
+
+**Cambios aplicados:**
+- `Apps/AGENTS.md`: creado protocolo operativo local reforzando `- Prompts literales del usuario:` palabra por palabra antes de cualquier `- Objetivo:` opcional y filtros de artefactos Android/Web.
+- `Apps/registro.txt`: añadidos prompts literales exactos recuperados de `transcript_full.jsonl` (`10bedccd`) en las sesiones de `SpotiLocal v1.8.5`, `v1.8.6`, `v1.8.7` y sincronización al monorrepo (`13/11/2026`), manteniendo intacto el historial de `SpotiLocal` y `entrena-offline v1.2–v1.8`.
 ================================================================================
