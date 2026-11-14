@@ -21,6 +21,7 @@ import {
 import { ChartConfiguration } from 'chart.js';
 import { useAppData } from '../../db/useAppData';
 import { ChartCanvas } from '../common/ChartCanvas';
+import { WeeklyCalendarGrid } from './WeeklyCalendarGrid';
 import { ScheduleCategory, ScheduleEvent } from '../../types/models';
 import {
   addDaysToDateKey,
@@ -34,10 +35,11 @@ import {
   computeScheduleAccuracy,
   getScheduledEventsForDate,
   SCHEDULE_CATEGORY_META,
-  SPANISH_WEEKDAY_SHORT
+  SPANISH_WEEKDAY_SHORT,
+  sortScheduleEvents
 } from '../../utils/scheduleStats';
 
-type ScheduleSubTab = 'daily' | 'accuracy' | 'manage';
+type ScheduleSubTab = 'daily' | 'weekly' | 'accuracy' | 'manage';
 type AccuracyRange = 7 | 30 | 90 | null;
 
 const ACCURACY_RANGES: { label: string; value: AccuracyRange }[] = [
@@ -89,10 +91,15 @@ export const ScheduleView: React.FC = () => {
   const isToday = selectedDateKey === todayKey;
   const weekKeys = useMemo(() => getWeekDateKeys(selectedDateKey), [selectedDateKey]);
 
+  const sortedScheduleEvents = useMemo(
+    () => sortScheduleEvents(scheduleEvents),
+    [scheduleEvents]
+  );
+
   const statusesOnSelected = attendanceMap.get(selectedDateKey) || {};
   const dayEvents = useMemo(
-    () => getScheduledEventsForDate(scheduleEvents, selectedDateKey, statusesOnSelected),
-    [scheduleEvents, selectedDateKey, statusesOnSelected]
+    () => getScheduledEventsForDate(sortedScheduleEvents, selectedDateKey, statusesOnSelected),
+    [sortedScheduleEvents, selectedDateKey, statusesOnSelected]
   );
 
   // Resumen del día seleccionado
@@ -183,6 +190,7 @@ export const ScheduleView: React.FC = () => {
     setFormStartDateKey(ev.startDateKey || todayKey);
     setFormError(null);
     setShowForm(true);
+    setSubTab('manage');
   };
 
   const toggleFormDay = (dayIdx: number) => {
@@ -249,23 +257,43 @@ export const ScheduleView: React.FC = () => {
           className={`tab-pill ${subTab === 'daily' ? 'active' : ''}`}
           onClick={() => setSubTab('daily')}
         >
-          Check diario
+          Check
+        </button>
+        <button
+          type="button"
+          className={`tab-pill ${subTab === 'weekly' ? 'active' : ''}`}
+          onClick={() => setSubTab('weekly')}
+        >
+          Semana
         </button>
         <button
           type="button"
           className={`tab-pill ${subTab === 'accuracy' ? 'active' : ''}`}
           onClick={() => setSubTab('accuracy')}
         >
-          Accuracy {accuracyReport.accuracyPercent !== null ? `(${accuracyReport.accuracyPercent}%)` : ''}
+          Accuracy {accuracyReport.accuracyPercent !== null ? `${Math.round(accuracyReport.accuracyPercent)}%` : ''}
         </button>
         <button
           type="button"
           className={`tab-pill ${subTab === 'manage' ? 'active' : ''}`}
           onClick={() => setSubTab('manage')}
         >
-          Mi Horario ({scheduleEvents.filter(e => e.active).length})
+          Eventos ({sortedScheduleEvents.filter(e => e.active).length})
         </button>
       </div>
+
+      {/* ================== VISTA SEMANAL TIPO GOOGLE CALENDAR ================== */}
+      {subTab === 'weekly' && (
+        <WeeklyCalendarGrid
+          selectedDateKey={selectedDateKey}
+          onSelectDateKey={setSelectedDateKey}
+          events={sortedScheduleEvents}
+          attendanceMap={attendanceMap}
+          onSetCheck={setScheduleEventCheck}
+          onEditEvent={openEditEventForm}
+          onCreateEvent={openNewEventForm}
+        />
+      )}
 
       {/* ================== PESTAÑA 1: CHECK DIARIO ================== */}
       {subTab === 'daily' && (
@@ -644,7 +672,7 @@ export const ScheduleView: React.FC = () => {
             ))}
           </div>
 
-          {scheduleEvents.length > 0 && (
+          {sortedScheduleEvents.length > 0 && (
             <div className="input-group">
               <label className="input-label">Filtrar por evento</label>
               <select
@@ -653,7 +681,7 @@ export const ScheduleView: React.FC = () => {
                 onChange={e => setFilterEventId(e.target.value)}
               >
                 <option value="all">Todos los eventos del horario</option>
-                {scheduleEvents.map(ev => (
+                {sortedScheduleEvents.map(ev => (
                   <option key={ev.id} value={ev.id}>
                     {ev.startTime}–{ev.endTime} · {ev.title}
                   </option>
@@ -972,7 +1000,7 @@ export const ScheduleView: React.FC = () => {
             </form>
           )}
 
-          {scheduleEvents.length === 0 ? (
+          {sortedScheduleEvents.length === 0 ? (
             <div className="card" style={{ textAlign: 'center', padding: '20px' }}>
               <p className="text-muted" style={{ fontSize: '0.84rem' }}>
                 No hay bloques horarios definidos todavía. Pulsa «Nuevo evento» para configurar tu rutina semanal.
@@ -980,8 +1008,22 @@ export const ScheduleView: React.FC = () => {
             </div>
           ) : (
             <div className="card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: '8px' }}>
+                <span style={{ fontSize: '0.76rem', fontWeight: 700, color: '#94a3b8' }}>
+                  Ordenados por hora (inicio – fin)
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ minHeight: '28px', padding: '3px 9px', fontSize: '0.72rem' }}
+                  onClick={() => setSubTab('weekly')}
+                >
+                  <CalendarDays size={13} color="#38bdf8" />
+                  Ver calendario semanal
+                </button>
+              </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {scheduleEvents.map(ev => {
+                {sortedScheduleEvents.map(ev => {
                   const meta = SCHEDULE_CATEGORY_META[ev.category] || SCHEDULE_CATEGORY_META.other;
                   const daysStr = ev.daysOfWeek.map(d => SPANISH_WEEKDAY_SHORT[d]).join(' · ');
                   return (
@@ -1061,59 +1103,6 @@ export const ScheduleView: React.FC = () => {
                             {confirmDeleteId === ev.id ? '¿Borrar?' : <Trash2 size={14} color="#f43f5e" />}
                           </button>
                         </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Resumen parrilla semanal L-D */}
-          {scheduleEvents.some(e => e.active) && (
-            <div className="card">
-              <div className="card-header">
-                <div className="card-title">
-                  <span>Resumen de tu Semana (L–D)</span>
-                </div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {SPANISH_WEEKDAY_SHORT.map((shortDay, wdIdx) => {
-                  const items = scheduleEvents.filter(e => e.active && e.daysOfWeek.includes(wdIdx));
-                  return (
-                    <div
-                      key={shortDay}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '7px 9px',
-                        borderRadius: '8px',
-                        background: 'var(--bg-subtle)',
-                        border: '1px solid var(--border-color)'
-                      }}
-                    >
-                      <span
-                        style={{
-                          width: '24px',
-                          height: '24px',
-                          borderRadius: '7px',
-                          background: items.length > 0 ? 'rgba(6, 182, 212, 0.2)' : 'rgba(148, 163, 184, 0.1)',
-                          color: items.length > 0 ? '#67e8f9' : '#64748b',
-                          fontWeight: 800,
-                          fontSize: '0.76rem',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0
-                        }}
-                      >
-                        {shortDay}
-                      </span>
-                      <div style={{ fontSize: '0.78rem', color: items.length > 0 ? '#e2e8f0' : '#64748b', minWidth: 0, flex: 1 }}>
-                        {items.length > 0
-                          ? items.map(it => `${it.startTime} ${it.title}`).join(' · ')
-                          : 'Libre'}
                       </div>
                     </div>
                   );

@@ -1262,3 +1262,20 @@ SESIÓN: 14/11/2026 - FECHAS ESTILO ESPAÑOL Y HORARIO RECURRENTE + ACCURACY ENT
   * `npm.cmd run build:apk`: `tsc -b && vite build` + generación y firma v2/v3 de `EntrenaOffline_v1.4.apk` (0.31 MB, `versionCode="5"`).
   * Inspección móvil en vivo (`360×800`): 0 errores de consola, `scrollWidth <= clientWidth` en las 6 pestañas, etiquetas de gráficas en `DD/MM`, marcado diario de cumplimiento, gráfica de Accuracy y creación de evento recurrente verificados.
 ================================================================================
+
+================================================================================
+SESIÓN: 15/11/2026 - ORDEN POR HORAS Y CALENDARIO SEMANAL ESTILO GOOGLE CALENDAR ENTRENA-OFFLINE v1.5
+================================================================================
+- Objetivo: Ordenar siempre los eventos de horario por hora (sin agrupar por días primero) y añadir una vista de calendario semanal proporcional estilo Google Calendar.
+- Cambios y Soluciones Aplicadas:
+  1. Calendario Semanal Estilo Google Calendar (`src/components/schedule/WeeklyCalendarGrid.tsx`):
+     * Nueva vista interactiva de cuadrícula semanal (`L–D` con alternancia a `L–V`) y columna vertical de horas proporcional (`44px/hora`), bloques coloreados por categoría e intervalo (`startTime–endTime`), cálculo de carriles paralelos ante solapes y línea de hora actual.
+     * Muestra en directo el estado de asistencia (`✓` cumplido, `✕` no cumplido) y al pulsar cualquier bloque abre tarjeta de detalle rápida con acciones de **Cumplido**, **No cumplido** y **Editar**.
+  2. Orden Estricto por Horas (`src/components/schedule/ScheduleView.tsx`):
+     * Sub-pestañas en `Horario`: `Check`, `Semana`, `Accuracy`, `Eventos`.
+     * Lista maestra en `Eventos` y selectores ordenados cronológicamente de menor a mayor hora de inicio (`sortScheduleEvents`), eliminando el listado agrupado por días y enlazando al nuevo calendario semanal.
+- Verificación:
+  * `npm.cmd test`: 22/22 pruebas Vitest pasadas en 4 archivos tras la última edición.
+  * `npm.cmd run build:apk`: `tsc -b && vite build` sin errores y generado `EntrenaOffline_v1.5.apk` (versionCode 6, firma v2/v3 verificada con `apksigner`).
+  * Inspección móvil (`360×800`): 4 sub-pestañas en fila única sin desbordamiento horizontal, orden estricto por horas comprobado al añadir evento de mañana (`09:00` por delante de `18:00`), cuadrícula semanal L–D/L–V interactiva y corregido warning de React en estilos de borde.
+================================================================================
