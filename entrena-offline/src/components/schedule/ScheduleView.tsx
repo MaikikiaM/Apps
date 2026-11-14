@@ -694,11 +694,17 @@ export const ScheduleView: React.FC = () => {
                 onChange={e => setFilterEventId(e.target.value)}
               >
                 <option value="all">Todos los eventos del horario</option>
-                {sortedScheduleEvents.map(ev => (
-                  <option key={ev.id} value={ev.id}>
-                    {ev.startTime}–{ev.endTime} · {ev.title}
-                  </option>
-                ))}
+                {sortedScheduleEvents.map(ev => {
+                  const daysLabel = [...ev.daysOfWeek]
+                    .sort((a, b) => a - b)
+                    .map(d => SPANISH_WEEKDAY_SHORT[d])
+                    .join('·');
+                  return (
+                    <option key={ev.id} value={ev.id}>
+                      {daysLabel} · {ev.startTime}–{ev.endTime} · {ev.title}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           )}
@@ -1115,7 +1121,7 @@ export const ScheduleView: React.FC = () => {
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: '8px' }}>
                 <span style={{ fontSize: '0.76rem', fontWeight: 700, color: '#94a3b8' }}>
-                  Ordenados por hora (inicio – fin)
+                  Ordenados por días (L–D) y hora
                 </span>
                 <button
                   type="button"
@@ -1130,7 +1136,10 @@ export const ScheduleView: React.FC = () => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {sortedScheduleEvents.map(ev => {
                   const meta = SCHEDULE_CATEGORY_META[ev.category] || SCHEDULE_CATEGORY_META.other;
-                  const daysStr = ev.daysOfWeek.map(d => SPANISH_WEEKDAY_SHORT[d]).join(' · ');
+                  const daysStr = [...ev.daysOfWeek]
+                    .sort((a, b) => a - b)
+                    .map(d => SPANISH_WEEKDAY_SHORT[d])
+                    .join(' · ');
                   return (
                     <div
                       key={ev.id}
@@ -1151,6 +1160,18 @@ export const ScheduleView: React.FC = () => {
                             <span
                               style={{
                                 fontSize: '0.74rem',
+                                fontWeight: 800,
+                                color: '#e2e8f0',
+                                background: 'rgba(148, 163, 184, 0.16)',
+                                padding: '2px 7px',
+                                borderRadius: '9999px'
+                              }}
+                            >
+                              {daysStr}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: '0.74rem',
                                 fontWeight: 700,
                                 color: meta.color,
                                 background: meta.bg,
@@ -1159,9 +1180,6 @@ export const ScheduleView: React.FC = () => {
                               }}
                             >
                               {ev.startTime} – {ev.endTime}
-                            </span>
-                            <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#cbd5e1' }}>
-                              {daysStr}
                             </span>
                           </div>
                           <div style={{ fontWeight: 700, fontSize: '0.94rem', marginTop: '4px' }}>

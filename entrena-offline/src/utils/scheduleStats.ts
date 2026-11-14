@@ -55,12 +55,37 @@ export function formatTransportSummary(ev: Pick<ScheduleEvent, 'transportBeforeM
   return '';
 }
 
-export function sortScheduleEvents(events: ScheduleEvent[]): ScheduleEvent[] {
+/** Ordena eventos de una misma jornada por hora (inicio -> fin -> título). */
+export function sortScheduleEventsByTime(events: ScheduleEvent[]): ScheduleEvent[] {
   return [...events].sort((a, b) => {
     const startCmp = a.startTime.localeCompare(b.startTime);
     if (startCmp !== 0) return startCmp;
     const endCmp = a.endTime.localeCompare(b.endTime);
     if (endCmp !== 0) return endCmp;
+    return a.title.localeCompare(b.title);
+  });
+}
+
+/** Ordena eventos recurrentes por días de la semana (L-D) y después por intervalo horario. */
+export function sortScheduleEvents(events: ScheduleEvent[]): ScheduleEvent[] {
+  return [...events].sort((a, b) => {
+    const aDays = [...(a.daysOfWeek || [])].sort((x, y) => x - y);
+    const bDays = [...(b.daysOfWeek || [])].sort((x, y) => x - y);
+    const aFirstDay = aDays.length > 0 ? aDays[0] : 99;
+    const bFirstDay = bDays.length > 0 ? bDays[0] : 99;
+    if (aFirstDay !== bFirstDay) return aFirstDay - bFirstDay;
+
+    const startCmp = a.startTime.localeCompare(b.startTime);
+    if (startCmp !== 0) return startCmp;
+    const endCmp = a.endTime.localeCompare(b.endTime);
+    if (endCmp !== 0) return endCmp;
+
+    const minLen = Math.min(aDays.length, bDays.length);
+    for (let i = 0; i < minLen; i++) {
+      if (aDays[i] !== bDays[i]) return aDays[i] - bDays[i];
+    }
+    if (aDays.length !== bDays.length) return aDays.length - bDays.length;
+
     return a.title.localeCompare(b.title);
   });
 }
@@ -76,7 +101,7 @@ export function getScheduledEventsForDate(
     if (!ev.active && !hasExplicitStatus) return false;
     return ev.daysOfWeek.includes(weekdayIdx) || hasExplicitStatus;
   });
-  return sortScheduleEvents(matching);
+  return sortScheduleEventsByTime(matching);
 }
 
 export interface EventAccuracySummary {

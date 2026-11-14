@@ -24,8 +24,19 @@ describe('Fechas estilo español y Horario / Accuracy', () => {
     expect(getSpanishWeekdayIndex('2026-11-14')).toBe(5);
   });
 
-  it('ordena y filtra los eventos recurrentes por intervalo horario y día de la semana', () => {
+  it('ordena los eventos recurrentes por días (L-D) y entonces horas, manteniendo orden horario dentro de cada fecha', () => {
     const events: ScheduleEvent[] = [
+      {
+        id: 'tuesday_early',
+        title: 'Pilates',
+        startTime: '07:15',
+        endTime: '08:00',
+        daysOfWeek: [1], // Martes (M)
+        category: 'habit',
+        startDateKey: '2026-11-09',
+        active: true,
+        createdAt: 100
+      },
       {
         id: 'late',
         title: 'Natación',
@@ -53,7 +64,7 @@ describe('Fechas estilo español y Horario / Accuracy', () => {
         title: 'Pausado',
         startTime: '07:00',
         endTime: '07:30',
-        daysOfWeek: [0],
+        daysOfWeek: [0], // Lunes
         category: 'habit',
         startDateKey: '2026-11-09',
         active: false,
@@ -61,18 +72,17 @@ describe('Fechas estilo español y Horario / Accuracy', () => {
       }
     ];
 
+    // Primero por día (L=0 antes que M=1) y dentro del mismo día por hora
     const sorted = sortScheduleEvents(events);
-    expect(sorted[0].id).toBe('paused');
-    expect(sorted[1].id).toBe('early');
-    expect(sorted[2].id).toBe('late');
+    expect(sorted.map(e => e.id)).toEqual(['paused', 'early', 'late', 'tuesday_early']);
 
     // 2026-11-09 es Lunes (weekday 0): early + late (paused ignorado salvo registro explícito)
     const mondayEvents = getScheduledEventsForDate(events, '2026-11-09');
     expect(mondayEvents.map(e => e.id)).toEqual(['early', 'late']);
 
-    // 2026-11-10 es Martes (weekday 1): solo early
+    // 2026-11-10 es Martes (weekday 1): orden estricto del día por horas (07:15 antes que 08:30)
     const tuesdayEvents = getScheduledEventsForDate(events, '2026-11-10');
-    expect(tuesdayEvents.map(e => e.id)).toEqual(['early']);
+    expect(tuesdayEvents.map(e => e.id)).toEqual(['tuesday_early', 'early']);
   });
 
   it('calcula accuracy global, por evento, unmarkedPast y rachas sin penalizar eventos futuros de hoy sin marcar', () => {

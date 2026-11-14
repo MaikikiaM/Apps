@@ -53,7 +53,7 @@ fs.writeFileSync(
   path.join(valuesDir, 'strings.xml'),
   `<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">EntrenaOffline v1.7</string>
+    <string name="app_name">EntrenaOffline v1.8</string>
 </resources>`.trim()
 );
 
@@ -72,8 +72,8 @@ console.log('--- 4. Creando AndroidManifest.xml ---');
 const manifestXml = `<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.entrena.offline"
-    android:versionCode="8"
-    android:versionName="1.7">
+    android:versionCode="9"
+    android:versionName="1.8">
 
     <uses-sdk
         android:minSdkVersion="24"
@@ -711,14 +711,14 @@ if (savedKeystoreBuf) {
   );
 }
 
-const finalApkPath = path.join(rootDir, 'EntrenaOffline_v1.7.apk');
+const finalApkPath = path.join(rootDir, 'EntrenaOffline_v1.8.apk');
 execSync(
   `"${apksigner}" sign --ks "${keystorePath}" --ks-pass pass:entrena123 --out "${finalApkPath}" "${alignedApk}"`,
   { stdio: 'inherit' }
 );
 // Mantener también copia genérica
 fs.copyFileSync(finalApkPath, path.join(rootDir, 'EntrenaOffline.apk'));
-console.log('✓ APK firmado correctamente como EntrenaOffline_v1.7.apk');
+console.log('✓ APK firmado correctamente como EntrenaOffline_v1.8.apk');
 
 // 11. Verificar firma
 execSync(`"${apksigner}" verify --verbose "${finalApkPath}"`, { stdio: 'inherit' });
