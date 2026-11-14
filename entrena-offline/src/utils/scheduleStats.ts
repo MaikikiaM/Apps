@@ -29,10 +29,31 @@ export const SCHEDULE_CATEGORY_META: Record<
   cardio: { label: 'Cardio / Running', color: '#fb7185', bg: 'rgba(244, 63, 94, 0.18)' },
   habit: { label: 'Hábito / Salud', color: '#34d399', bg: 'rgba(16, 185, 129, 0.18)' },
   leisure: { label: 'Ocio / Descanso', color: '#facc15', bg: 'rgba(234, 179, 8, 0.18)' },
+  transport: { label: 'Transporte', color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.16)' },
   other: { label: 'Otro', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.16)' }
 };
 
 export const VALID_SCHEDULE_CATEGORIES = Object.keys(SCHEDULE_CATEGORY_META) as ScheduleCategory[];
+
+export const EVENT_SELECTABLE_CATEGORIES = VALID_SCHEDULE_CATEGORIES.filter(
+  cat => cat !== 'transport'
+);
+
+export function minutesToHHMM(totalMinutes: number): string {
+  const clamped = Math.max(0, Math.min(23 * 60 + 59, Math.round(totalMinutes)));
+  const h = Math.floor(clamped / 60);
+  const m = clamped % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+export function formatTransportSummary(ev: Pick<ScheduleEvent, 'transportBeforeMinutes' | 'transportAfterMinutes'>): string {
+  const before = ev.transportBeforeMinutes && ev.transportBeforeMinutes > 0 ? ev.transportBeforeMinutes : 0;
+  const after = ev.transportAfterMinutes && ev.transportAfterMinutes > 0 ? ev.transportAfterMinutes : 0;
+  if (before > 0 && after > 0) return `Ida ${before}m · Vuelta ${after}m`;
+  if (before > 0) return `Ida ${before}m`;
+  if (after > 0) return `Vuelta ${after}m`;
+  return '';
+}
 
 export function sortScheduleEvents(events: ScheduleEvent[]): ScheduleEvent[] {
   return [...events].sort((a, b) => {
@@ -107,9 +128,10 @@ export function computeScheduleAccuracy(
   const rangeDays = options.rangeDays === undefined ? 30 : options.rangeDays;
   const filterEventId = options.filterEventId || null;
 
+  const trackableEvents = events.filter(ev => ev.category !== 'transport');
   const targetEvents = filterEventId
-    ? events.filter(ev => ev.id === filterEventId)
-    : events;
+    ? trackableEvents.filter(ev => ev.id === filterEventId)
+    : trackableEvents;
 
   if (targetEvents.length === 0) {
     return {

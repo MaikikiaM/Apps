@@ -20,10 +20,14 @@ import {
   toLocalDateKey
 } from '../../utils/dates';
 import {
+  EVENT_SELECTABLE_CATEGORIES,
+  minutesToHHMM,
   SCHEDULE_CATEGORY_META,
   SPANISH_WEEKDAY_SHORT,
   sortScheduleEvents
 } from '../../utils/scheduleStats';
+
+void EVENT_SELECTABLE_CATEGORIES;
 
 interface WeeklyCalendarGridProps {
   selectedDateKey: string;
@@ -36,11 +40,26 @@ interface WeeklyCalendarGridProps {
 }
 
 interface PositionedBlock {
+  blockId: string;
   event: ScheduleEvent;
+  isTransport: boolean;
+  transportRole?: 'before' | 'after';
+  displayStartTime: string;
+  displayEndTime: string;
   startMin: number;
   endMin: number;
   lane: number;
   totalLanes: number;
+}
+
+interface InspectedSelection {
+  blockId: string;
+  eventId: string;
+  dateKey: string;
+  isTransport: boolean;
+  transportRole?: 'before' | 'after';
+  displayStartTime: string;
+  displayEndTime: string;
 }
 
 function parseTimeToMinutes(hhmm: string): number {
@@ -55,14 +74,68 @@ function formatHourLabel(hour: number): string {
   return `${String(hour).padStart(2, '0')}:00`;
 }
 
-// Calcula columnas internas cuando dos eventos coinciden a la misma hora en el mismo día
+// Expande cada evento con sus bloques complementarios de transporte (ida/vuelta) y resuelve solapes en carriles
 function layoutOverlappingEvents(dayEvents: ScheduleEvent[]): PositionedBlock[] {
-  const sorted = sortScheduleEvents(dayEvents).map(ev => {
+  const expanded: {
+    blockId: string;
+    event: ScheduleEvent;
+    isTransport: boolean;
+    transportRole?: 'before' | 'after';
+    displayStartTime: string;
+    displayEndTime: string;
+    startMin: number;
+    endMin: number;
+  }[] = [];
+
+  for (const ev of sortScheduleEvents(dayEvents)) {
     const startMin = parseTimeToMinutes(ev.startTime);
     const rawEnd = parseTimeToMinutes(ev.endTime);
     const endMin = Math.max(startMin + 25, rawEnd);
-    return { event: ev, startMin, endMin };
-  });
+
+    const beforeMin = ev.transportBeforeMinutes && ev.transportBeforeMinutes > 0 ? ev.transportBeforeMinutes : 0;
+    if (beforeMin > 0 && startMin > 0) {
+      const trStart = Math.max(0, startMin - beforeMin);
+      const trVisualEnd = Math.max(trStart + 15, startMin);
+      expanded.push({
+        blockId: `${ev.id}__tr_before`,
+        event: ev,
+        isTransport: true,
+        transportRole: 'before',
+        displayStartTime: minutesToHHMM(trStart),
+        displayEndTime: ev.startTime,
+        startMin: trStart,
+        endMin: trVisualEnd
+      });
+    }
+
+    expanded.push({
+      blockId: ev.id,
+      event: ev,
+      isTransport: false,
+      displayStartTime: ev.startTime,
+      displayEndTime: ev.endTime,
+      startMin,
+      endMin
+    });
+
+    const afterMin = ev.transportAfterMinutes && ev.transportAfterMinutes > 0 ? ev.transportAfterMinutes : 0;
+    if (afterMin > 0 && rawEnd < 24 * 60) {
+      const trEnd = Math.min(24 * 60, rawEnd + afterMin);
+      const trVisualEnd = Math.max(rawEnd + 15, trEnd);
+      expanded.push({
+        blockId: `${ev.id}__tr_after`,
+        event: ev,
+        isTransport: true,
+        transportRole: 'after',
+        displayStartTime: ev.endTime,
+        displayEndTime: minutesToHHMM(Math.min(23 * 60 + 59, trEnd)),
+        startMin: rawEnd,
+        endMin: trVisualEnd
+      });
+    }
+  }
+
+  const sorted = expanded.sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
 
   const blocks: PositionedBlock[] = [];
   let cluster: typeof sorted = [];
@@ -87,7 +160,12 @@ function layoutOverlappingEvents(dayEvents: ScheduleEvent[]): PositionedBlock[] 
     const totalLanes = Math.max(1, laneEnds.length);
     for (const entry of assigned) {
       blocks.push({
+        blockId: entry.item.blockId,
         event: entry.item.event,
+        isTransport: entry.item.isTransport,
+        transportRole: entry.item.transportRole,
+        displayStartTime: entry.item.displayStartTime,
+        displayEndTime: entry.item.displayEndTime,
         startMin: entry.item.startMin,
         endMin: entry.item.endMin,
         lane: entry.lane,
@@ -124,7 +202,7 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
   onCreateEvent
 }) => {
   const [showWeekdaysOnly, setShowWeekdaysOnly] = useState<boolean>(false);
-  const [inspectedBlock, setInspectedBlock] = useState<{ eventId: string; dateKey: string } | null>(null);
+  const [inspectedBlock, setInspectedBlock] = useState<InspectedSelection | null>(null);
 
   const todayKey = toLocalDateKey(new Date());
   const weekKeys = useMemo(() => getWeekDateKeys(selectedDateKey), [selectedDateKey]);
@@ -138,7 +216,7 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
     [events]
   );
 
-  // Rango vertical dinámico de horas para no dejar huecos vacíos innecesarios
+  // Rango vertical dinámico de horas contemplando eventos y su transporte previo/posterior
   const { startHour, endHour } = useMemo(() => {
     if (activeEvents.length === 0) {
       return { startHour: 8, endHour: 22 };
@@ -146,8 +224,10 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
     let minH = 23;
     let maxH = 0;
     for (const ev of activeEvents) {
-      const sMin = parseTimeToMinutes(ev.startTime);
-      const eMin = parseTimeToMinutes(ev.endTime);
+      const beforeMin = ev.transportBeforeMinutes && ev.transportBeforeMinutes > 0 ? ev.transportBeforeMinutes : 0;
+      const afterMin = ev.transportAfterMinutes && ev.transportAfterMinutes > 0 ? ev.transportAfterMinutes : 0;
+      const sMin = Math.max(0, parseTimeToMinutes(ev.startTime) - beforeMin);
+      const eMin = Math.min(24 * 60, parseTimeToMinutes(ev.endTime) + afterMin);
       minH = Math.min(minH, Math.floor(sMin / 60));
       maxH = Math.max(maxH, Math.ceil(eMin / 60));
     }
@@ -423,50 +503,72 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
                     />
                   )}
 
-                  {/* Bloques de eventos posicionados por intervalo horario */}
+                  {/* Bloques de eventos y transporte posicionados por intervalo horario */}
                   {col.blocks.map(block => {
                     const topPx = Math.max(
                       0,
                       ((block.startMin - startHour * 60) / 60) * HOUR_HEIGHT_PX
                     );
                     const heightPx = Math.max(
-                      20,
-                      ((block.endMin - block.startMin) / 60) * HOUR_HEIGHT_PX - 2
+                      block.isTransport ? 16 : 20,
+                      ((block.endMin - block.startMin) / 60) * HOUR_HEIGHT_PX - 1
                     );
                     const leftPct = (block.lane / block.totalLanes) * 100;
                     const widthPct = 100 / block.totalLanes;
 
-                    const meta = SCHEDULE_CATEGORY_META[block.event.category] || SCHEDULE_CATEGORY_META.other;
-                    const status = col.statuses[block.event.id];
+                    const meta = block.isTransport
+                      ? SCHEDULE_CATEGORY_META.transport
+                      : SCHEDULE_CATEGORY_META[block.event.category] || SCHEDULE_CATEGORY_META.other;
+                    const status = block.isTransport ? undefined : col.statuses[block.event.id];
                     const isInspected =
-                      inspectedBlock?.eventId === block.event.id &&
+                      inspectedBlock?.blockId === block.blockId &&
                       inspectedBlock?.dateKey === col.dateKey;
 
-                    const bg =
-                      status === 'completed'
-                        ? 'rgba(16, 185, 129, 0.28)'
-                        : status === 'missed'
-                        ? 'rgba(244, 63, 94, 0.24)'
-                        : meta.bg;
-                    const accent =
-                      status === 'completed'
-                        ? '#10b981'
-                        : status === 'missed'
-                        ? '#f43f5e'
-                        : meta.color;
+                    const bg = block.isTransport
+                      ? SCHEDULE_CATEGORY_META.transport.bg
+                      : status === 'completed'
+                      ? 'rgba(16, 185, 129, 0.28)'
+                      : status === 'missed'
+                      ? 'rgba(244, 63, 94, 0.24)'
+                      : meta.bg;
+                    const accent = block.isTransport
+                      ? SCHEDULE_CATEGORY_META.transport.color
+                      : status === 'completed'
+                      ? '#10b981'
+                      : status === 'missed'
+                      ? '#f43f5e'
+                      : meta.color;
+
+                    const subtleBorder = isInspected
+                      ? '1.5px solid #f8fafc'
+                      : block.isTransport
+                      ? '1px dashed rgba(148, 163, 184, 0.45)'
+                      : '1px solid rgba(255,255,255,0.08)';
+
+                    const blockTitle = block.isTransport
+                      ? `${block.transportRole === 'before' ? 'Ida' : 'Vuelta'}: ${block.event.title}`
+                      : block.event.title;
 
                     return (
                       <button
-                        key={`${block.event.id}-${col.dateKey}`}
+                        key={`${block.blockId}-${col.dateKey}`}
                         type="button"
                         onClick={() =>
                           setInspectedBlock(
                             isInspected
                               ? null
-                              : { eventId: block.event.id, dateKey: col.dateKey }
+                              : {
+                                  blockId: block.blockId,
+                                  eventId: block.event.id,
+                                  dateKey: col.dateKey,
+                                  isTransport: block.isTransport,
+                                  transportRole: block.transportRole,
+                                  displayStartTime: block.displayStartTime,
+                                  displayEndTime: block.displayEndTime
+                                }
                           )
                         }
-                        title={`${block.event.title} (${block.event.startTime}–${block.event.endTime})`}
+                        title={`${blockTitle} (${block.displayStartTime}–${block.displayEndTime})`}
                         style={{
                           position: 'absolute',
                           top: `${topPx + 1}px`,
@@ -474,15 +576,9 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
                           left: `calc(${leftPct}% + 1px)`,
                           width: `calc(${widthPct}% - 2px)`,
                           background: bg,
-                          borderTop: isInspected
-                            ? '1.5px solid #f8fafc'
-                            : '1px solid rgba(255,255,255,0.08)',
-                          borderRight: isInspected
-                            ? '1.5px solid #f8fafc'
-                            : '1px solid rgba(255,255,255,0.08)',
-                          borderBottom: isInspected
-                            ? '1.5px solid #f8fafc'
-                            : '1px solid rgba(255,255,255,0.08)',
+                          borderTop: subtleBorder,
+                          borderRight: subtleBorder,
+                          borderBottom: subtleBorder,
                           borderLeft: `3px solid ${accent}`,
                           borderRadius: '5px',
                           padding: '2px 3px',
@@ -492,14 +588,14 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
                           display: 'flex',
                           flexDirection: 'column',
                           justifyContent: 'flex-start',
-                          zIndex: isInspected ? 5 : 2,
-                          color: '#f8fafc'
+                          zIndex: isInspected ? 5 : block.isTransport ? 1 : 2,
+                          color: block.isTransport ? '#e2e8f0' : '#f8fafc'
                         }}
                       >
                         <div
                           style={{
-                            fontSize: showWeekdaysOnly ? '0.64rem' : '0.56rem',
-                            fontWeight: 700,
+                            fontSize: showWeekdaysOnly ? '0.62rem' : '0.54rem',
+                            fontWeight: block.isTransport ? 600 : 700,
                             lineHeight: 1.15,
                             display: '-webkit-box',
                             WebkitLineClamp: heightPx >= 48 ? 3 : heightPx >= 32 ? 2 : 1,
@@ -509,8 +605,9 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
                             textDecoration: status === 'missed' ? 'line-through' : 'none'
                           }}
                         >
-                          {status === 'completed' ? '✓ ' : status === 'missed' ? '✕ ' : ''}
-                          {block.event.title}
+                          {block.isTransport
+                            ? `🚌 ${block.transportRole === 'before' ? 'Ida' : 'Vuelta'} · ${block.event.title}`
+                            : `${status === 'completed' ? '✓ ' : status === 'missed' ? '✕ ' : ''}${block.event.title}`}
                         </div>
                         {heightPx >= 34 && (
                           <div
@@ -524,7 +621,7 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
                               overflow: 'hidden'
                             }}
                           >
-                            {block.event.startTime}
+                            {block.displayStartTime}
                           </div>
                         )}
                       </button>
@@ -537,12 +634,14 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
         </div>
       )}
 
-      {/* Tarjeta de detalle rápido al pulsar una clase en el calendario */}
+      {/* Tarjeta de detalle rápido al pulsar una clase o desplazamiento en el calendario */}
       {selectedEventObj && inspectedBlock && (
         <div
           className="card"
           style={{
-            borderColor: 'rgba(56, 189, 248, 0.5)',
+            borderColor: inspectedBlock.isTransport
+              ? 'rgba(148, 163, 184, 0.5)'
+              : 'rgba(56, 189, 248, 0.5)',
             background: 'rgba(15, 23, 42, 0.95)',
             display: 'flex',
             flexDirection: 'column',
@@ -551,13 +650,26 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: '0.74rem', color: '#38bdf8', fontWeight: 700 }}>
-                {selectedEventObj.startTime} – {selectedEventObj.endTime} ·{' '}
+              <div
+                style={{
+                  fontSize: '0.74rem',
+                  color: inspectedBlock.isTransport ? '#94a3b8' : '#38bdf8',
+                  fontWeight: 700
+                }}
+              >
+                {inspectedBlock.displayStartTime} – {inspectedBlock.displayEndTime} ·{' '}
                 {formatFullSpanishDate(inspectedBlock.dateKey)}
               </div>
               <div style={{ fontWeight: 800, fontSize: '1rem', marginTop: '2px' }}>
-                {selectedEventObj.title}
+                {inspectedBlock.isTransport
+                  ? `🚌 Transporte (${inspectedBlock.transportRole === 'before' ? 'Ida a' : 'Vuelta de'}: ${selectedEventObj.title})`
+                  : selectedEventObj.title}
               </div>
+              {inspectedBlock.isTransport && (
+                <div style={{ fontSize: '0.74rem', color: '#94a3b8', marginTop: '3px' }}>
+                  Bloque complementario de desplazamiento · No computa en Accuracy
+                </div>
+              )}
             </div>
             <button
               type="button"
@@ -570,7 +682,7 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
             </button>
           </div>
 
-          {(() => {
+          {!inspectedBlock.isTransport && (() => {
             const currentSt = (attendanceMap.get(inspectedBlock.dateKey) || {})[selectedEventObj.id];
             return (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>

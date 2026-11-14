@@ -115,6 +115,7 @@ export type ScheduleCategory =
   | 'cardio'
   | 'habit'
   | 'leisure'
+  | 'transport'
   | 'other';
 
 export type ScheduleCheckStatus = 'completed' | 'missed';
@@ -127,6 +128,8 @@ export interface ScheduleEvent {
   daysOfWeek: number[];          // 0=Lun, 1=Mar, 2=Mié, 3=Jue, 4=Vie, 5=Sáb, 6=Dom
   category: ScheduleCategory;
   startDateKey: string;          // 'YYYY-MM-DD' desde cuándo cuenta en Accuracy
+  transportBeforeMinutes?: number; // Desplazamiento complementario de ida antes del evento (sin accuracy)
+  transportAfterMinutes?: number;  // Desplazamiento complementario de vuelta después del evento (sin accuracy)
   active: boolean;
   createdAt: number;
 }

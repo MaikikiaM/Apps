@@ -226,6 +226,8 @@ describe('storageGuard - Validación, checksums y espejo local', () => {
           endTime: '11:00',
           daysOfWeek: [0, 2],
           category: 'university',
+          transportBeforeMinutes: 25,
+          transportAfterMinutes: 20,
           startDateKey: '2026-11-10',
           active: true,
           createdAt: 1700000000000
@@ -240,6 +242,8 @@ describe('storageGuard - Validación, checksums y espejo local', () => {
     expect(v3Result.payload?.scheduleEvents).toHaveLength(3);
     expect(v3Result.payload?.scheduleEvents?.find(e => e.id === 'ev_2')?.category).toBe('conservatory');
     expect(v3Result.payload?.scheduleEvents?.find(e => e.id === 'ev_3')?.category).toBe('university');
+    expect(v3Result.payload?.scheduleEvents?.find(e => e.id === 'ev_3')?.transportBeforeMinutes).toBe(25);
+    expect(v3Result.payload?.scheduleEvents?.find(e => e.id === 'ev_3')?.transportAfterMinutes).toBe(20);
     expect(v3Result.payload?.scheduleAttendance?.[0].statuses.ev_1).toBe('completed');
 
     // Retrocompatibilidad v2 sin scheduleEvents/scheduleAttendance

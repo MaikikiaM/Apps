@@ -342,6 +342,7 @@ export function validateAndNormalizeBackupJson(jsonStr: string): ValidationResul
     'cardio',
     'habit',
     'leisure',
+    'transport',
     'other'
   ];
   const evMap = new Map<string, ScheduleEvent>();
@@ -358,6 +359,14 @@ export function validateAndNormalizeBackupJson(jsonStr: string): ValidationResul
       const startDateKey = typeof rec.startDateKey === 'string' && DATE_KEY_REGEX.test(rec.startDateKey)
         ? rec.startDateKey
         : new Date(createdAt).toISOString().slice(0, 10);
+      const beforeMin =
+        typeof rec.transportBeforeMinutes === 'number' && Number.isFinite(rec.transportBeforeMinutes)
+          ? Math.min(240, Math.max(0, Math.round(rec.transportBeforeMinutes)))
+          : 0;
+      const afterMin =
+        typeof rec.transportAfterMinutes === 'number' && Number.isFinite(rec.transportAfterMinutes)
+          ? Math.min(240, Math.max(0, Math.round(rec.transportAfterMinutes)))
+          : 0;
       evMap.set(rec.id.trim(), {
         id: rec.id.trim(),
         title: rec.title.trim(),
@@ -366,6 +375,8 @@ export function validateAndNormalizeBackupJson(jsonStr: string): ValidationResul
         daysOfWeek: days,
         category: cat,
         startDateKey,
+        ...(beforeMin > 0 ? { transportBeforeMinutes: beforeMin } : {}),
+        ...(afterMin > 0 ? { transportAfterMinutes: afterMin } : {}),
         active: rec.active !== false,
         createdAt
       });

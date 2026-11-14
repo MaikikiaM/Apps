@@ -8,7 +8,9 @@ import {
 } from './dates';
 import {
   computeScheduleAccuracy,
+  formatTransportSummary,
   getScheduledEventsForDate,
+  minutesToHHMM,
   sortScheduleEvents
 } from './scheduleStats';
 import { ScheduleDayRecord, ScheduleEvent } from '../types/models';
@@ -130,5 +132,66 @@ describe('Fechas estilo español y Horario / Accuracy', () => {
     expect(swimItem?.completed).toBe(2);
     expect(swimItem?.expected).toBe(3);
     expect(swimItem?.accuracyPercent).toBe(66.7);
+  });
+
+  it('formatea bloques de transporte ida/vuelta y los excluye del cálculo de accuracy', () => {
+    expect(minutesToHHMM(16 * 60 + 30)).toBe('16:30');
+    expect(minutesToHHMM(-15)).toBe('00:00');
+    expect(minutesToHHMM(25 * 60)).toBe('23:59');
+
+    const baseEvent: ScheduleEvent = {
+      id: 'ev_uni',
+      title: 'Álgebra Lineal',
+      startTime: '09:00',
+      endTime: '11:00',
+      daysOfWeek: [0, 2, 4],
+      category: 'university',
+      transportBeforeMinutes: 30,
+      transportAfterMinutes: 20,
+      startDateKey: '2026-11-09',
+      active: true,
+      createdAt: 1
+    };
+
+    expect(formatTransportSummary(baseEvent)).toBe('Ida 30m · Vuelta 20m');
+    expect(formatTransportSummary({ ...baseEvent, transportBeforeMinutes: 0, transportAfterMinutes: 15 })).toBe(
+      'Vuelta 15m'
+    );
+    expect(formatTransportSummary({ ...baseEvent, transportBeforeMinutes: 25, transportAfterMinutes: 0 })).toBe(
+      'Ida 25m'
+    );
+    expect(formatTransportSummary({ ...baseEvent, transportBeforeMinutes: 0, transportAfterMinutes: 0 })).toBe('');
+
+    // Incluso si existiera un evento heredado con categoría 'transport', nunca debe computar accuracy
+    const legacyTransportEvent: ScheduleEvent = {
+      id: 'ev_tr',
+      title: 'Bus campus',
+      startTime: '08:30',
+      endTime: '09:00',
+      daysOfWeek: [0, 1, 2, 3, 4],
+      category: 'transport',
+      startDateKey: '2026-11-09',
+      active: true,
+      createdAt: 2
+    };
+
+    const attendance: ScheduleDayRecord[] = [
+      { date: '2026-11-09', statuses: { ev_uni: 'completed', ev_tr: 'missed' }, updatedAt: 1 },
+      { date: '2026-11-11', statuses: { ev_uni: 'completed' }, updatedAt: 2 },
+      { date: '2026-11-13', statuses: { ev_uni: 'missed' }, updatedAt: 3 }
+    ];
+
+    const report = computeScheduleAccuracy([baseEvent, legacyTransportEvent], attendance, {
+      rangeDays: 30,
+      todayKey: '2026-11-14'
+    });
+
+    // Solo computan los 3 días de ev_uni (L, X, V); ni transportBefore/After ni ev_tr afectan
+    expect(report.expected).toBe(3);
+    expect(report.completed).toBe(2);
+    expect(report.missed).toBe(1);
+    expect(report.accuracyPercent).toBe(66.7);
+    expect(report.perEvent).toHaveLength(1);
+    expect(report.perEvent[0].eventId).toBe('ev_uni');
   });
 });

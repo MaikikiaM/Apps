@@ -33,6 +33,8 @@ import {
 } from '../../utils/dates';
 import {
   computeScheduleAccuracy,
+  EVENT_SELECTABLE_CATEGORIES,
+  formatTransportSummary,
   getScheduledEventsForDate,
   SCHEDULE_CATEGORY_META,
   SPANISH_WEEKDAY_SHORT,
@@ -82,6 +84,8 @@ export const ScheduleView: React.FC = () => {
   const [formDays, setFormDays] = useState<number[]>([0, 2, 4]);
   const [formCategory, setFormCategory] = useState<ScheduleCategory>('swim');
   const [formStartDateKey, setFormStartDateKey] = useState<string>(toLocalDateKey(new Date()));
+  const [formTransportBefore, setFormTransportBefore] = useState<number>(0);
+  const [formTransportAfter, setFormTransportAfter] = useState<number>(0);
   const [formError, setFormError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
@@ -175,6 +179,8 @@ export const ScheduleView: React.FC = () => {
     setFormDays([0, 2, 4]);
     setFormCategory('swim');
     setFormStartDateKey(todayKey);
+    setFormTransportBefore(0);
+    setFormTransportAfter(0);
     setFormError(null);
     setShowForm(true);
     setSubTab('manage');
@@ -186,8 +192,10 @@ export const ScheduleView: React.FC = () => {
     setFormStartTime(ev.startTime);
     setFormEndTime(ev.endTime);
     setFormDays(ev.daysOfWeek);
-    setFormCategory(ev.category);
+    setFormCategory(ev.category === 'transport' ? 'other' : ev.category);
     setFormStartDateKey(ev.startDateKey || todayKey);
+    setFormTransportBefore(ev.transportBeforeMinutes || 0);
+    setFormTransportAfter(ev.transportAfterMinutes || 0);
     setFormError(null);
     setShowForm(true);
     setSubTab('manage');
@@ -215,6 +223,9 @@ export const ScheduleView: React.FC = () => {
       return;
     }
 
+    const cleanBefore = Math.min(240, Math.max(0, Math.round(formTransportBefore || 0)));
+    const cleanAfter = Math.min(240, Math.max(0, Math.round(formTransportAfter || 0)));
+
     const existing = editingId ? scheduleEvents.find(ev => ev.id === editingId) : undefined;
     const item: ScheduleEvent = {
       id: existing?.id || `sch_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -224,6 +235,8 @@ export const ScheduleView: React.FC = () => {
       daysOfWeek: [...formDays].sort((a, b) => a - b),
       category: formCategory,
       startDateKey: formStartDateKey || todayKey,
+      ...(cleanBefore > 0 ? { transportBeforeMinutes: cleanBefore } : {}),
+      ...(cleanAfter > 0 ? { transportAfterMinutes: cleanAfter } : {}),
       active: existing ? existing.active : true,
       createdAt: existing?.createdAt || Date.now()
     };
@@ -956,9 +969,9 @@ export const ScheduleView: React.FC = () => {
                     value={formCategory}
                     onChange={e => setFormCategory(e.target.value as ScheduleCategory)}
                   >
-                    {Object.entries(SCHEDULE_CATEGORY_META).map(([key, meta]) => (
+                    {EVENT_SELECTABLE_CATEGORIES.map(key => (
                       <option key={key} value={key}>
-                        {meta.label}
+                        {SCHEDULE_CATEGORY_META[key].label}
                       </option>
                     ))}
                   </select>
@@ -972,6 +985,98 @@ export const ScheduleView: React.FC = () => {
                     value={formStartDateKey}
                     onChange={e => e.target.value && setFormStartDateKey(e.target.value)}
                   />
+                </div>
+              </div>
+
+              {/* Transporte complementario (ida y/o vuelta en el cuadro semanal, sin accuracy) */}
+              <div
+                style={{
+                  background: 'var(--bg-subtle)',
+                  borderRadius: '10px',
+                  padding: '10px',
+                  border: '1px dashed rgba(148, 163, 184, 0.35)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px'
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#cbd5e1' }}>
+                    🚌 Transporte complementario (opcional)
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>
+                    Aparece en el cuadro semanal antes/después del evento, sin contar en Accuracy.
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <div className="input-group">
+                    <label className="input-label">Ida (min antes)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={240}
+                      step={5}
+                      className="input-field"
+                      value={formTransportBefore}
+                      onChange={e => setFormTransportBefore(Math.max(0, Math.min(240, Number(e.target.value) || 0)))}
+                    />
+                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap' }}>
+                      {[0, 15, 20, 30, 45].map(m => (
+                        <button
+                          key={`b-${m}`}
+                          type="button"
+                          onClick={() => setFormTransportBefore(m)}
+                          style={{
+                            padding: '2px 6px',
+                            borderRadius: '6px',
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            border: `1px solid ${formTransportBefore === m ? '#94a3b8' : 'var(--border-color)'}`,
+                            background: formTransportBefore === m ? 'rgba(148, 163, 184, 0.25)' : 'var(--bg-input)',
+                            color: '#e2e8f0',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {m}m
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="input-group">
+                    <label className="input-label">Vuelta (min después)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={240}
+                      step={5}
+                      className="input-field"
+                      value={formTransportAfter}
+                      onChange={e => setFormTransportAfter(Math.max(0, Math.min(240, Number(e.target.value) || 0)))}
+                    />
+                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap' }}>
+                      {[0, 15, 20, 30, 45].map(m => (
+                        <button
+                          key={`a-${m}`}
+                          type="button"
+                          onClick={() => setFormTransportAfter(m)}
+                          style={{
+                            padding: '2px 6px',
+                            borderRadius: '6px',
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            border: `1px solid ${formTransportAfter === m ? '#94a3b8' : 'var(--border-color)'}`,
+                            background: formTransportAfter === m ? 'rgba(148, 163, 184, 0.25)' : 'var(--bg-input)',
+                            color: '#e2e8f0',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {m}m
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -1062,8 +1167,11 @@ export const ScheduleView: React.FC = () => {
                           <div style={{ fontWeight: 700, fontSize: '0.94rem', marginTop: '4px' }}>
                             {ev.title} {!ev.active && <span style={{ color: '#fbbf24', fontSize: '0.75rem' }}>(Pausado)</span>}
                           </div>
-                          <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '2px' }}>
-                            Desde el {formatSpanishDateSlash(ev.startDateKey)}
+                          <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '2px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <span>Desde el {formatSpanishDateSlash(ev.startDateKey)}</span>
+                            {formatTransportSummary(ev) && (
+                              <span style={{ color: '#94a3b8' }}>🚌 {formatTransportSummary(ev)}</span>
+                            )}
                           </div>
                         </div>
 
