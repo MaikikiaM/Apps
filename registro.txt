@@ -1206,6 +1206,8 @@ SESIÓN: 13/11/2026 - SINCRONIZACIÓN SPOTILOCAL v1.8.5-v1.8.7 AL MONORREPO APPS
 ================================================================================
 SESIÓN: 13/11/2026 - MEJORA INTEGRAL MÓVIL Y NUEVAS FUNCIONES ENTRENA-OFFLINE v1.2
 ================================================================================
+- Prompt literal del usuario:
+  * [13/11/2026 23:01]: "La app de entrenamientos se ven mal en el movil algunas cosas. Por ejemplo, al añadir un entrenamiento de natacion en lo de poner metros se sale del cuadro, o en el tiempo dedicado solo se ven los segundos... Es muy mejorable todo en generall. Mejoralo. Mira un poco todo y mejora todo lo que veas e incluso aplica nuevas cosas /goal"
 - Objetivo: Corregir desbordamientos y recortes en pantalla móvil (360px) de `entrena-offline`, corregir bugs de edición/hooks y añadir nuevas funcionalidades útiles.
 - Cambios y Soluciones Aplicadas:
   1. Rediseño Móvil Responsivo (`theme.css`, `SwimLoggerCard.tsx`, `StrengthLoggerCard.tsx`, `ChartsHubView.tsx`, `CalendarView.tsx`, `SettingsView.tsx`, `MathProgressView.tsx`):
@@ -1228,6 +1230,8 @@ SESIÓN: 13/11/2026 - MEJORA INTEGRAL MÓVIL Y NUEVAS FUNCIONES ENTRENA-OFFLINE 
 ================================================================================
 SESIÓN: 13/11/2026 - BLINDAJE MULTI-CAPA DE DATOS ENTRENA-OFFLINE v1.3
 ================================================================================
+- Prompt literal del usuario:
+  * [13/11/2026 23:08]: "Ademas, asegurate de que los datos tengan muchisimas medidas de seguridad. Es muy problematico el tema de perder datos. Como ya sabes, paso en el spoti y fue muy grave"
 - Objetivo: Blindar todos los datos de `entrena-offline` (Web/PWA y APK Android) contra pérdida, corrupción de almacenamiento WebView o borrados accidentales, aplicando lecciones de `SpotiLocal`.
 - Medidas Implementadas:
   1. Almacén Nativo Android Fuera de WebView (`scripts/build-apk.mjs`):
@@ -1248,6 +1252,9 @@ SESIÓN: 13/11/2026 - BLINDAJE MULTI-CAPA DE DATOS ENTRENA-OFFLINE v1.3
 ================================================================================
 SESIÓN: 14/11/2026 - FECHAS ESTILO ESPAÑOL Y HORARIO RECURRENTE + ACCURACY ENTRENA-OFFLINE v1.4
 ================================================================================
+- Prompt literal del usuario:
+  * [14/11/2026 18:21]: "De primeras: Lo veo todo bastante bien aunque todas las fechas deben ser estilo español, no americano. Por ejemplo, en la grafica el dia aparece como "mes/dia" en vez de "dia/mes".
+Añado que quiero tb poder ponerme un horario en la app e ir poniendo si cumplo o no. Es decir, añadir eventos (que se repitan siempre en ese intervalo horario) y cada dia ir poniendo check o no. Despues quiero tener la opcion de ver la "accuracy", de ver el porcentaje de asistencia basicamente."
 - Objetivo: Cambiar todas las fechas visibles al formato español (`DD/MM`, `DD/MM/AA`, `DD/MM/AAAA`) y añadir un módulo de horario semanal recurrente con checklist diario de cumplimiento y cálculo de Accuracy (% de asistencia).
 - Cambios y Soluciones Aplicadas:
   1. Formato de Fechas Español en Toda la App (`src/utils/dates.ts`, gráficas y vistas):
@@ -1266,6 +1273,8 @@ SESIÓN: 14/11/2026 - FECHAS ESTILO ESPAÑOL Y HORARIO RECURRENTE + ACCURACY ENT
 ================================================================================
 SESIÓN: 15/11/2026 - ORDEN POR HORAS Y CALENDARIO SEMANAL ESTILO GOOGLE CALENDAR ENTRENA-OFFLINE v1.5
 ================================================================================
+- Prompt literal del usuario:
+  * [15/11/2026 00:11]: "ordena los eventos por horas en vez de por dias y entonces horas. Btw, ne gustaria poder tener un calendario de la semana como tal con las clases al estilo google calendar"
 - Objetivo: Ordenar siempre los eventos de horario por hora (sin agrupar por días primero) y añadir una vista de calendario semanal proporcional estilo Google Calendar.
 - Cambios y Soluciones Aplicadas:
   1. Calendario Semanal Estilo Google Calendar (`src/components/schedule/WeeklyCalendarGrid.tsx`):
@@ -1283,6 +1292,8 @@ SESIÓN: 15/11/2026 - ORDEN POR HORAS Y CALENDARIO SEMANAL ESTILO GOOGLE CALENDA
 ================================================================================
 SESIÓN: 15/11/2026 - NUEVAS CATEGORÍAS DE HORARIO (UNIVERSIDAD, CONSERVATORIO...) v1.6
 ================================================================================
+- Prompt literal del usuario:
+  * [15/11/2026 00:13]: "Y hacen falta mas categorias a elegir. Tales como "universidad", "conservatorio""
 - Objetivo: Ampliar el catálogo de categorías seleccionables para el horario semanal (`Universidad`, `Conservatorio`, etc.) con colores diferenciados en el calendario y validación en copias de seguridad.
 - Cambios Aplicados:
   * `models.ts`, `scheduleStats.ts`, `storageGuard.ts`: Ampliado `ScheduleCategory` y `SCHEDULE_CATEGORY_META` a 11 categorías con colores propios: `Universidad`, `Conservatorio`, `Estudio / Academia`, `Idiomas`, `Trabajo / Proyecto`, `Natación`, `Fuerza / Gym`, `Cardio / Running`, `Hábito / Salud`, `Ocio / Descanso` y `Otro`.
@@ -1295,6 +1306,9 @@ SESIÓN: 15/11/2026 - NUEVAS CATEGORÍAS DE HORARIO (UNIVERSIDAD, CONSERVATORIO.
 ================================================================================
 SESIÓN: 15/11/2026 - CATEGORÍA TRANSPORTE COMPLEMENTARIA (IDA/VUELTA) SIN ACCURACY v1.7
 ================================================================================
+- Prompts literales del usuario:
+  * [15/11/2026 00:19]: "como se editan los eventos ya creados?" (resuelto explicando botón lápiz en `Eventos`, `Check` y `Semana`)
+  * [15/11/2026 00:24]: "deberia haber una categoria de "transporte" que represente cuando estoy yendo a un sitio. Deberia ser una cosa que no sea un evento, sino que pueda ponerla como complementario de un evento antes y/o despues de este. La idea es que aparezca como un evento en el cuadro semanal pero que no tenga "accuracy""
 - Objetivo: Añadir la categoría `Transporte` como desplazamiento complementario antes (`Ida`) y/o después (`Vuelta`) de cada evento recurrente, visible en la rejilla semanal estilo Google Calendar pero excluida del cálculo de Accuracy.
 - Cambios y Soluciones Aplicadas:
   1. Modelo de Datos y Utilidades (`models.ts`, `scheduleStats.ts`, `storageGuard.ts`):
@@ -1313,6 +1327,12 @@ SESIÓN: 15/11/2026 - CATEGORÍA TRANSPORTE COMPLEMENTARIA (IDA/VUELTA) SIN ACCU
 ================================================================================
 SESIÓN: 15/11/2026 - ORDEN DE EVENTOS POR DÍAS (L-D) Y ENTONCES HORAS v1.8
 ================================================================================
+- Prompts literales del usuario:
+  * [15/11/2026 00:25]: "Y me equivoque al decirte algo antes. Los eventos estan ordenados por horas y quiero que esten ordenados por dias y entonces horas"
+  * [15/11/2026 00:29]: "Donde guardas el .txt en el que vas registrando todo?"
+  * [15/11/2026 00:33]: "Por cierto, mientras te digo todo esto estoy metiendo mi horario. Con las actualizaciones no se van a borrar los eventos nunca, no? Ya sabes, super seguridad de datos a prueba de perdidas total"
+  * [15/11/2026 00:36]: "Y en el registro poner mis prompts tal cual los digo?"
+  * [15/11/2026 00:37]: "Si, deben ser los prompts literales del usuario /learn"
 - Objetivo: Corregir la ordenación maestra de eventos recurrentes para que se ordenen primero por días de la semana (`L–D`) y después por intervalo horario (`inicio – fin`), manteniendo dentro de cada jornada diaria (`Check diario`) el orden cronológico puro por hora.
 - Cambios Aplicados:
   * `src/utils/scheduleStats.ts`:
