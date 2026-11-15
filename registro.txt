@@ -1431,3 +1431,24 @@ SESIÓN: 15/11/2026 - ACCURACY POR CATEGORÍA, MODAL CENTRADO Y CUADRÍCULA AJUS
   * `npm test`: 4/4 archivos de test, 24/24 tests Vitest superados (incluidas aserciones de `perCategory` en `src/utils/scheduleStats.test.ts`).
   * `npm run build:apk`: build TypeScript/Vite PWA limpio y APK `EntrenaOffline_v2.1.apk` (0.31 MB, firmado v2/v3) verificado con `apksigner`.
   * Verificación visual móvil (`360x800`, 0 errores de consola): modo `Ajustado` (`508.88px` vs `796.88px` en `Ampliado`) mostrando de `07:00` a `23:00` en pantalla completa, tarjeta `Accuracy por Categoría` con filtro por categoría y modal flotante centrado al tocar eventos.
+
+================================================================================
+SESIÓN: 15/11/2026 - MOTIVOS DE NO CUMPLIDO Y CLASIFICACIÓN POR PALABRAS ENTRENA-OFFLINE v2.2
+================================================================================
+- Prompts literales del usuario:
+  * [15/11/2026 01:22]: "Molaria que cuando no se cumpla algo se de la razon y que estas razones se puedan ver y que tb se clasifiquen por mismas palabtras como hacen los eventos"
+- Cambios técnicos implementados:
+  * Modelo y persistencia segura (`src/types/models.ts`, `src/db/storageGuard.ts`, `src/db/useAppData.tsx`, `src/db/database.ts`):
+    - Añadido `reasons?: Record<string, string>` opcional en `ScheduleDayRecord`, saneado en `validateAndNormalizeBackup()` (descarta motivos si no corresponden a `'missed'` y conserva retrocompatibilidad con backups previos).
+    - `setScheduleEventCheck` acepta `reason?: string` y limpia motivos al marcar `'completed'` o desmarcar (`null`); `seedDemoData()` genera motivos variados en datos demo.
+  * Normalización y análisis de motivos (`src/utils/scheduleStats.ts`):
+    - Añadidas `normalizeReasonGroupKey()`, `extractReasonKeywords()` (sin conectores españoles frecuentes) y `computeMissedReasonsReport()` excluyendo `'transport'` y respetando filtros temporales/evento/categoría.
+    - Agrupa motivos equivalentes ignorando mayúsculas, tildes y espacios múltiples (`MissedReasonGroup`), registra variantes escritas y contabiliza palabras clave compartidas (`MissedReasonKeyword`).
+  * Flujo de registro y visualización (`src/components/schedule/MissedReasonModal.tsx`, `src/components/schedule/WeeklyCalendarGrid.tsx`, `src/components/schedule/ScheduleView.tsx`):
+    - Nuevo modal reutilizable `MissedReasonModal` al pulsar `No cumplido` desde `Diario` o desde el diálogo centrado de `Semana`, con chips de motivos previos/predefinidos, campo libre, aviso en tiempo real de agrupación equivalente y edición posterior del motivo.
+    - Nueva tarjeta **Motivos de No Cumplido** en `Horario -> Accuracy` con resumen (`X/Y con motivo`), chips interactivos de **Palabras repetidas** para filtrar, grupos clasificados por mismas palabras con barra porcentual, variantes agrupadas y lista fechada de ocurrencias.
+  * Versión elevada a `v2.2` (`package.json`, `index.html`, `TopHeader.tsx`, `scripts/build-apk.mjs` `versionCode="13"` -> `EntrenaOffline_v2.2.apk`) y documentación actualizada (`docs/ia/ESTADO.md`).
+- Verificación:
+  * `npm test`: 4/4 archivos de test, 25/25 tests Vitest superados (incluidas pruebas de `computeMissedReasonsReport` en `src/utils/scheduleStats.test.ts` y saneamiento de `reasons` en `src/db/storageGuard.test.ts`).
+  * `npm run build:apk`: build TypeScript/Vite PWA limpio y APK `EntrenaOffline_v2.2.apk` (0.31 MB, firmado v2/v3) verificado con `apksigner`.
+  * Verificación móvil en vivo (`360×800`, 0 errores de consola): comprobado flujo completo de registro de motivo en `Diario` y `Semana`, detección en vivo de equivalencia («falta de tiémpo» -> «Falta de tiempo»), filtro por chips de palabras repetidas y tarjeta agrupada `Motivos de No Cumplido` en `Accuracy`.

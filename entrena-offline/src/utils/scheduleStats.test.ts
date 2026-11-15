@@ -8,13 +8,16 @@ import {
 } from './dates';
 import {
   computeGroupedEventHours,
+  computeMissedReasonsReport,
   computeScheduleAccuracy,
+  extractReasonKeywords,
   formatHoursMinutesShort,
   formatTransportSummary,
   getEventDurationMinutes,
   getScheduledEventsForDate,
   minutesToHHMM,
   normalizeEventGroupKey,
+  normalizeReasonGroupKey,
   sortScheduleEvents
 } from './scheduleStats';
 import { ScheduleDayRecord, ScheduleEvent } from '../types/models';
@@ -311,5 +314,97 @@ describe('Fechas estilo español y Horario / Accuracy', () => {
     expect(swimCat).toBeDefined();
     expect(swimCat?.eventsCount).toBe(1);
     expect(swimCat?.completed).toBe(1);
+  });
+
+  it('clasifica motivos de no cumplido por mismas palabras y palabras clave compartidas', () => {
+    expect(normalizeReasonGroupKey('  Falta   de Tiémpo ')).toBe('falta de tiempo');
+    expect(extractReasonKeywords('Mucho cansancio físico por el trabajo')).toEqual([
+      'cansancio',
+      'fisico',
+      'trabajo'
+    ]);
+
+    const evUni: ScheduleEvent = {
+      id: 'ev_uni',
+      title: 'Cálculo II',
+      startTime: '09:00',
+      endTime: '11:00',
+      daysOfWeek: [0, 2, 4],
+      category: 'university',
+      startDateKey: '2026-11-01',
+      active: true,
+      createdAt: 1
+    };
+    const evSwim: ScheduleEvent = {
+      id: 'ev_swim',
+      title: 'Natación',
+      startTime: '19:00',
+      endTime: '20:00',
+      daysOfWeek: [1, 3],
+      category: 'swim',
+      startDateKey: '2026-11-01',
+      active: true,
+      createdAt: 2
+    };
+    const evTrans: ScheduleEvent = {
+      id: 'ev_tr',
+      title: 'Bus',
+      startTime: '08:30',
+      endTime: '09:00',
+      daysOfWeek: [0],
+      category: 'transport',
+      startDateKey: '2026-11-01',
+      active: true,
+      createdAt: 3
+    };
+
+    const records: ScheduleDayRecord[] = [
+      {
+        date: '2026-11-09',
+        statuses: { ev_uni: 'missed', ev_tr: 'missed' },
+        reasons: { ev_uni: 'Falta de tiempo', ev_tr: 'Bus lleno' },
+        updatedAt: 1
+      },
+      {
+        date: '2026-11-11',
+        statuses: { ev_uni: 'missed', ev_swim: 'missed' },
+        reasons: { ev_uni: '  falta de  tiémpo ', ev_swim: 'Cansancio físico y falta de sueño' },
+        updatedAt: 2
+      },
+      {
+        date: '2026-11-12',
+        statuses: { ev_swim: 'missed' },
+        reasons: { ev_swim: 'Falta de Tiempo' },
+        updatedAt: 3
+      },
+      {
+        date: '2026-11-13',
+        statuses: { ev_uni: 'missed' }, // sin motivo escrito
+        updatedAt: 4
+      }
+    ];
+
+    const report = computeMissedReasonsReport([evUni, evSwim, evTrans], records, {
+      rangeDays: 14,
+      todayKey: '2026-11-15'
+    });
+
+    // Transport excluido -> 5 incumplimientos totales (4 con motivo, 1 sin motivo)
+    expect(report.totalMissed).toBe(5);
+    expect(report.missedWithReason).toBe(4);
+    expect(report.missedWithoutReason).toBe(1);
+
+    // 2 grupos equivalentes: 'falta de tiempo' (3 veces) y 'cansancio fisico y falta de sueno' (1 vez)
+    expect(report.groups).toHaveLength(2);
+    expect(report.groups[0].groupKey).toBe('falta de tiempo');
+    expect(report.groups[0].count).toBe(3);
+    expect(report.groups[0].percentage).toBe(75);
+    expect(report.groups[0].variants).toHaveLength(3);
+
+    // La palabra clave 'falta' aparece en los 4 motivos (3 + 1), 'tiempo' en 3
+    expect(report.keywordCounts[0].keyword).toBe('falta');
+    expect(report.keywordCounts[0].count).toBe(4);
+    const tiempoKw = report.keywordCounts.find(k => k.keyword === 'tiempo');
+    expect(tiempoKw?.count).toBe(3);
   });
 });

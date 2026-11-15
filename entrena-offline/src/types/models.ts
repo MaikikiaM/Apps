@@ -137,6 +137,7 @@ export interface ScheduleEvent {
 export interface ScheduleDayRecord {
   date: string;                  // 'YYYY-MM-DD'
   statuses: Record<string, ScheduleCheckStatus>; // eventId -> 'completed' | 'missed'
+  reasons?: Record<string, string>;              // eventId -> motivo cuando está marcado como 'missed'
   updatedAt: number;
 }
 

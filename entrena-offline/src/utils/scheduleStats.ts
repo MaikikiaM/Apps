@@ -55,6 +55,40 @@ export function normalizeEventGroupKey(title: string): string {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
+const REASON_STOPWORDS = new Set([
+  'a', 'al', 'algo', 'ante', 'bajo', 'con', 'contra', 'cual', 'cuando', 'de', 'del', 'desde',
+  'donde', 'durante', 'e', 'el', 'ella', 'ellas', 'ellos', 'en', 'entre', 'era', 'es', 'esa',
+  'ese', 'eso', 'esta', 'este', 'esto', 'estoy', 'fue', 'fui', 'ha', 'hacia', 'hasta', 'hay',
+  'hoy', 'la', 'las', 'le', 'les', 'lo', 'los', 'mas', 'me', 'mi', 'mis', 'mucho', 'muy',
+  'nada', 'ni', 'no', 'nos', 'o', 'otra', 'otro', 'para', 'pero', 'poco', 'por', 'porque',
+  'que', 'quien', 'se', 'sin', 'sobre', 'solo', 'su', 'sus', 'te', 'tenia', 'todo', 'tu',
+  'tus', 'un', 'una', 'uno', 'unos', 'unas', 'y', 'ya'
+]);
+
+/** Normaliza una razón de incumplimiento ignorando mayúsculas, tildes y espacios múltiples. */
+export function normalizeReasonGroupKey(reason: string): string {
+  return normalizeEventGroupKey(reason);
+}
+
+/** Extrae palabras clave normalizadas (>= 3 letras y sin conectores) de una razón de incumplimiento. */
+export function extractReasonKeywords(reason: string): string[] {
+  const norm = normalizeReasonGroupKey(reason);
+  if (!norm) return [];
+  const rawTokens = norm.split(/[^a-z0-9]+/).filter(Boolean);
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const token of rawTokens) {
+    if (token.length < 3) continue;
+    if (/^\d+$/.test(token)) continue;
+    if (REASON_STOPWORDS.has(token)) continue;
+    if (!seen.has(token)) {
+      seen.add(token);
+      result.push(token);
+    }
+  }
+  return result;
+}
+
 /** Duración del bloque horario en minutos (sin contar desplazamiento). */
 export function getEventDurationMinutes(ev: Pick<ScheduleEvent, 'startTime' | 'endTime'>): number {
   const [sh, sm] = ev.startTime.split(':').map(n => parseInt(n, 10));
@@ -187,15 +221,17 @@ export interface ScheduleAccuracyReport {
   dailySeries: DailyAccuracyPoint[];
 }
 
+export interface ScheduleQueryOptions {
+  rangeDays?: number | null;
+  todayKey?: string;
+  filterEventId?: string | null;
+  filterEventIds?: string[] | null;
+}
+
 export function computeScheduleAccuracy(
   events: ScheduleEvent[],
   attendanceRecords: ScheduleDayRecord[],
-  options: {
-    rangeDays?: number | null;
-    todayKey?: string;
-    filterEventId?: string | null;
-    filterEventIds?: string[] | null;
-  } = {}
+  options: ScheduleQueryOptions = {}
 ): ScheduleAccuracyReport {
   const todayKey = options.todayKey || toLocalDateKey(new Date());
   const rangeDays = options.rangeDays === undefined ? 30 : options.rangeDays;
@@ -597,4 +633,196 @@ export function computeGroupedEventHours(
   }
 
   return { groups, totals };
+}
+
+export interface MissedReasonEntry {
+  dateKey: string;
+  eventId: string;
+  eventTitle: string;
+  category: ScheduleCategory;
+  startTime: string;
+  endTime: string;
+  reason: string;
+  groupKey: string;
+  keywords: string[];
+}
+
+export interface MissedReasonGroup {
+  groupKey: string;
+  displayLabel: string;
+  count: number;
+  percentage: number;
+  variants: string[];
+  entries: MissedReasonEntry[];
+}
+
+export interface MissedReasonKeyword {
+  keyword: string;
+  displayWord: string;
+  count: number;
+}
+
+export interface MissedReasonsReport {
+  totalMissed: number;
+  missedWithReason: number;
+  missedWithoutReason: number;
+  groups: MissedReasonGroup[];
+  keywordCounts: MissedReasonKeyword[];
+  entries: MissedReasonEntry[];
+}
+
+/**
+ * Recopila y clasifica los motivos de incumplimiento ('missed') agrupando por texto
+ * normalizado equivalente (igual que los eventos) y por palabras clave compartidas.
+ */
+export function computeMissedReasonsReport(
+  events: ScheduleEvent[],
+  attendanceRecords: ScheduleDayRecord[],
+  options: ScheduleQueryOptions = {}
+): MissedReasonsReport {
+  const todayKey = options.todayKey || toLocalDateKey(new Date());
+  const rangeDays = options.rangeDays === undefined ? null : options.rangeDays;
+  const filterEventId = options.filterEventId || null;
+  const filterEventIdSet =
+    options.filterEventIds && options.filterEventIds.length > 0
+      ? new Set(options.filterEventIds)
+      : null;
+
+  const trackableEvents = events.filter(ev => {
+    if (ev.category === 'transport') return false;
+    if (filterEventId && ev.id !== filterEventId) return false;
+    if (filterEventIdSet && !filterEventIdSet.has(ev.id)) return false;
+    return true;
+  });
+  const eventMap = new Map<string, ScheduleEvent>();
+  for (const ev of trackableEvents) {
+    eventMap.set(ev.id, ev);
+  }
+
+  const windowStartKey =
+    rangeDays !== null && rangeDays > 0
+      ? addDaysToDateKey(todayKey, -(rangeDays - 1))
+      : null;
+
+  let totalMissed = 0;
+  let missedWithReason = 0;
+  const entries: MissedReasonEntry[] = [];
+  const groupsMap = new Map<
+    string,
+    {
+      groupKey: string;
+      displayLabel: string;
+      variantsSet: Set<string>;
+      entries: MissedReasonEntry[];
+    }
+  >();
+  const keywordsMap = new Map<string, { displayWord: string; count: number }>();
+
+  for (const rec of attendanceRecords) {
+    if (!rec.date || rec.date > todayKey) continue;
+    if (windowStartKey && rec.date < windowStartKey) continue;
+
+    const statuses = rec.statuses || {};
+    const reasons = rec.reasons || {};
+
+    for (const [eventId, status] of Object.entries(statuses)) {
+      if (status !== 'missed') continue;
+      const ev = eventMap.get(eventId);
+      if (!ev) continue;
+
+      totalMissed += 1;
+      const rawReason = typeof reasons[eventId] === 'string' ? reasons[eventId].trim().replace(/\s+/g, ' ') : '';
+      const groupKey = normalizeReasonGroupKey(rawReason);
+      if (!groupKey) continue;
+
+      missedWithReason += 1;
+      const keywords = extractReasonKeywords(rawReason);
+      const entry: MissedReasonEntry = {
+        dateKey: rec.date,
+        eventId: ev.id,
+        eventTitle: ev.title,
+        category: ev.category,
+        startTime: ev.startTime,
+        endTime: ev.endTime,
+        reason: rawReason,
+        groupKey,
+        keywords
+      };
+      entries.push(entry);
+
+      let grp = groupsMap.get(groupKey);
+      if (!grp) {
+        grp = {
+          groupKey,
+          displayLabel: rawReason,
+          variantsSet: new Set([rawReason]),
+          entries: [entry]
+        };
+        groupsMap.set(groupKey, grp);
+      } else {
+        grp.variantsSet.add(rawReason);
+        grp.entries.push(entry);
+        // Preferir variante con mayúscula inicial o tildes para mostrar como etiqueta principal
+        if (/[^\u0000-\u007f]/.test(rawReason) && !/[^\u0000-\u007f]/.test(grp.displayLabel)) {
+          grp.displayLabel = rawReason;
+        }
+      }
+
+      // Contar palabras clave originales preservando alguna variante legible
+      const rawWordTokens = rawReason.split(/[^A-Za-zÀ-ÿ0-9]+/).filter(Boolean);
+      const rawByNorm = new Map<string, string>();
+      for (const rw of rawWordTokens) {
+        const nk = normalizeReasonGroupKey(rw);
+        if (nk && !rawByNorm.has(nk)) rawByNorm.set(nk, rw.toLocaleLowerCase('es'));
+      }
+
+      for (const kw of keywords) {
+        const candidateWord = rawByNorm.get(kw) || kw;
+        const prev = keywordsMap.get(kw);
+        if (!prev) {
+          keywordsMap.set(kw, { displayWord: candidateWord, count: 1 });
+        } else {
+          prev.count += 1;
+          if (/[^\u0000-\u007f]/.test(candidateWord) && !/[^\u0000-\u007f]/.test(prev.displayWord)) {
+            prev.displayWord = candidateWord;
+          }
+        }
+      }
+    }
+  }
+
+  entries.sort((a, b) => b.dateKey.localeCompare(a.dateKey) || a.startTime.localeCompare(b.startTime));
+
+  const groups: MissedReasonGroup[] = Array.from(groupsMap.values())
+    .map(g => {
+      const sortedEntries = [...g.entries].sort(
+        (a, b) => b.dateKey.localeCompare(a.dateKey) || a.startTime.localeCompare(b.startTime)
+      );
+      return {
+        groupKey: g.groupKey,
+        displayLabel: g.displayLabel,
+        count: g.entries.length,
+        percentage: missedWithReason > 0 ? Math.round((g.entries.length / missedWithReason) * 100) : 0,
+        variants: Array.from(g.variantsSet),
+        entries: sortedEntries
+      };
+    })
+    .sort((a, b) => b.count - a.count || a.displayLabel.localeCompare(b.displayLabel));
+
+  const keywordCounts: MissedReasonKeyword[] = Array.from(keywordsMap.entries())
+    .map(([keyword, data]) => ({
+      keyword,
+      displayWord: data.displayWord,
+      count: data.count
+    }))
+    .sort((a, b) => b.count - a.count || a.displayWord.localeCompare(b.displayWord));
+
+  return {
+    totalMissed,
+    missedWithReason,
+    missedWithoutReason: Math.max(0, totalMissed - missedWithReason),
+    groups,
+    keywordCounts,
+    entries
+  };
 }

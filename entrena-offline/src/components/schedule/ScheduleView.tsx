@@ -17,12 +17,14 @@ import {
   Target,
   Flame,
   CheckCheck,
-  Link2
+  Link2,
+  MessageSquareWarning
 } from 'lucide-react';
 import { ChartConfiguration } from 'chart.js';
 import { useAppData } from '../../db/useAppData';
 import { ChartCanvas } from '../common/ChartCanvas';
 import { WeeklyCalendarGrid } from './WeeklyCalendarGrid';
+import { MissedReasonModal } from './MissedReasonModal';
 import { ScheduleCategory, ScheduleEvent } from '../../types/models';
 import {
   addDaysToDateKey,
@@ -34,6 +36,7 @@ import {
 } from '../../utils/dates';
 import {
   computeGroupedEventHours,
+  computeMissedReasonsReport,
   computeScheduleAccuracy,
   EVENT_SELECTABLE_CATEGORIES,
   formatHoursMinutesShort,
@@ -69,6 +72,7 @@ export const ScheduleView: React.FC = () => {
     scheduleEvents,
     scheduleAttendance,
     attendanceMap,
+    scheduleReasonsMap,
     saveScheduleEventItem,
     deleteScheduleEventItem,
     setScheduleEventCheck,
@@ -92,6 +96,13 @@ export const ScheduleView: React.FC = () => {
   const [formTransportAfter, setFormTransportAfter] = useState<number>(0);
   const [formError, setFormError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [reasonDraft, setReasonDraft] = useState<{
+    dateKey: string;
+    event: ScheduleEvent;
+    initialReason: string;
+  } | null>(null);
+  const [selectedReasonKeyword, setSelectedReasonKeyword] = useState<string | null>(null);
+  const [expandedReasonGroupKey, setExpandedReasonGroupKey] = useState<string | null>(null);
 
   const dateInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -105,6 +116,7 @@ export const ScheduleView: React.FC = () => {
   );
 
   const statusesOnSelected = attendanceMap.get(selectedDateKey) || {};
+  const reasonsOnSelected = scheduleReasonsMap.get(selectedDateKey) || {};
   const dayEvents = useMemo(
     () => getScheduledEventsForDate(sortedScheduleEvents, selectedDateKey, statusesOnSelected),
     [sortedScheduleEvents, selectedDateKey, statusesOnSelected]
@@ -209,6 +221,32 @@ export const ScheduleView: React.FC = () => {
       }),
     [scheduleEvents, scheduleAttendance, rangeDays, todayKey, filterEventId, activeFilterGroup, activeFilterCategory, activeCategoryEventIds]
   );
+
+  // Motivos de incumplimiento globales (para sugerencias) y filtrados (para análisis en Accuracy)
+  const missedReasonsGlobal = useMemo(
+    () => computeMissedReasonsReport(scheduleEvents, scheduleAttendance, { rangeDays: null, todayKey }),
+    [scheduleEvents, scheduleAttendance, todayKey]
+  );
+
+  const missedReasonsReport = useMemo(
+    () =>
+      computeMissedReasonsReport(scheduleEvents, scheduleAttendance, {
+        rangeDays,
+        todayKey,
+        filterEventId: filterEventId === 'all' || activeFilterGroup || activeFilterCategory ? null : filterEventId,
+        filterEventIds: activeFilterGroup
+          ? activeFilterGroup.eventIds
+          : activeCategoryEventIds
+      }),
+    [scheduleEvents, scheduleAttendance, rangeDays, todayKey, filterEventId, activeFilterGroup, activeFilterCategory, activeCategoryEventIds]
+  );
+
+  const visibleReasonGroups = useMemo(() => {
+    if (!selectedReasonKeyword) return missedReasonsReport.groups;
+    return missedReasonsReport.groups.filter(g =>
+      g.entries.some(e => e.keywords.includes(selectedReasonKeyword))
+    );
+  }, [missedReasonsReport.groups, selectedReasonKeyword]);
 
   // Gráfica de evolución Accuracy con fechas DD/MM
   const accuracyChartConfig: ChartConfiguration = useMemo(() => {
@@ -381,8 +419,12 @@ export const ScheduleView: React.FC = () => {
           onSelectDateKey={setSelectedDateKey}
           events={sortedScheduleEvents}
           attendanceMap={attendanceMap}
+          reasonsMap={scheduleReasonsMap}
           attendanceRecords={scheduleAttendance}
           onSetCheck={setScheduleEventCheck}
+          onRequestMissedReason={(dateKey, event, currentReason) =>
+            setReasonDraft({ dateKey, event, initialReason: currentReason || '' })
+          }
           onEditEvent={openEditEventForm}
           onCreateEvent={openNewEventForm}
         />
@@ -675,6 +717,43 @@ export const ScheduleView: React.FC = () => {
                         </span>
                       </div>
 
+                      {status === 'missed' && (() => {
+                        const savedReason = reasonsOnSelected[ev.id] || '';
+                        return (
+                          <div
+                            style={{
+                              background: 'rgba(244, 63, 94, 0.12)',
+                              border: '1px solid rgba(244, 63, 94, 0.32)',
+                              borderRadius: '9px',
+                              padding: '6px 9px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '8px'
+                            }}
+                          >
+                            <div style={{ fontSize: '0.74rem', color: '#fecdd3', minWidth: 0, flex: 1 }}>
+                              <strong style={{ color: '#fb7185' }}>Motivo:</strong>{' '}
+                              {savedReason || <span style={{ color: '#94a3b8' }}>Sin especificar</span>}
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              style={{ minHeight: '24px', padding: '2px 7px', fontSize: '0.68rem', color: '#fda4af', flexShrink: 0 }}
+                              onClick={() =>
+                                setReasonDraft({
+                                  dateKey: selectedDateKey,
+                                  event: ev,
+                                  initialReason: savedReason
+                                })
+                              }
+                            >
+                              {savedReason ? 'Editar' : 'Añadir motivo'}
+                            </button>
+                          </div>
+                        );
+                      })()}
+
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                         <button
                           type="button"
@@ -709,13 +788,17 @@ export const ScheduleView: React.FC = () => {
 
                         <button
                           type="button"
-                          onClick={() =>
-                            setScheduleEventCheck(
-                              selectedDateKey,
-                              ev.id,
-                              status === 'missed' ? null : 'missed'
-                            )
-                          }
+                          onClick={() => {
+                            if (status === 'missed') {
+                              void setScheduleEventCheck(selectedDateKey, ev.id, null);
+                            } else {
+                              setReasonDraft({
+                                dateKey: selectedDateKey,
+                                event: ev,
+                                initialReason: reasonsOnSelected[ev.id] || ''
+                              });
+                            }
+                          }}
                           style={{
                             minHeight: '40px',
                             borderRadius: '10px',
@@ -1212,6 +1295,176 @@ export const ScheduleView: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* Motivos de no cumplido clasificados por mismas palabras y palabras clave */}
+          {missedReasonsReport.totalMissed > 0 && (
+            <div className="card">
+              <div className="card-header">
+                <div className="card-title">
+                  <MessageSquareWarning size={17} color="#fb7185" />
+                  <span>Motivos de No Cumplido</span>
+                </div>
+                <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#fda4af' }}>
+                  {missedReasonsReport.missedWithReason}/{missedReasonsReport.totalMissed} con motivo
+                </span>
+              </div>
+
+              {missedReasonsReport.groups.length === 0 ? (
+                <div style={{ fontSize: '0.82rem', color: '#94a3b8' }}>
+                  Tienes {missedReasonsReport.totalMissed}{' '}
+                  {missedReasonsReport.totalMissed === 1 ? 'evento sin cumplir' : 'eventos sin cumplir'}, todavía sin
+                  motivo escrito. Pulsa «Añadir motivo» al marcar «No cumplido» para clasificarlos.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {/* Clasificación por palabras clave compartidas */}
+                  {missedReasonsReport.keywordCounts.length > 0 && (
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' }}>
+                          Palabras repetidas
+                        </span>
+                        {selectedReasonKeyword && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            style={{ minHeight: '22px', padding: '1px 6px', fontSize: '0.68rem', color: '#fda4af' }}
+                            onClick={() => setSelectedReasonKeyword(null)}
+                          >
+                            Ver todos
+                          </button>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                        {missedReasonsReport.keywordCounts.slice(0, 12).map(kw => {
+                          const isSelected = selectedReasonKeyword === kw.keyword;
+                          return (
+                            <button
+                              key={kw.keyword}
+                              type="button"
+                              onClick={() => setSelectedReasonKeyword(isSelected ? null : kw.keyword)}
+                              style={{
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                padding: '4px 9px',
+                                borderRadius: '9999px',
+                                border: `1px solid ${isSelected ? '#f43f5e' : 'var(--border-color)'}`,
+                                background: isSelected ? 'rgba(244, 63, 94, 0.24)' : 'var(--bg-subtle)',
+                                color: isSelected ? '#ffe4e6' : '#cbd5e1',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {kw.displayWord} ({kw.count})
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Grupos clasificados por mismas palabras */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {visibleReasonGroups.map(group => {
+                      const isExpanded = expandedReasonGroupKey === group.groupKey;
+                      const displayedEntries = isExpanded ? group.entries : group.entries.slice(0, 3);
+                      return (
+                        <div
+                          key={group.groupKey}
+                          style={{
+                            background: 'var(--bg-subtle)',
+                            borderRadius: '10px',
+                            padding: '10px 12px',
+                            border: '1px solid var(--border-color)'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', marginBottom: '6px' }}>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#ffe4e6' }}>
+                                {group.displayLabel}
+                              </div>
+                              {group.variants.length > 1 && (
+                                <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginTop: '2px' }}>
+                                  Variantes agrupadas: {group.variants.map(v => `«${v}»`).join(', ')}
+                                </div>
+                              )}
+                            </div>
+                            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                              <div style={{ fontWeight: 800, fontSize: '0.98rem', color: '#fb7185' }}>
+                                {group.count}×
+                              </div>
+                              <div style={{ fontSize: '0.68rem', color: '#94a3b8' }}>
+                                {group.percentage}%
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ height: '5px', borderRadius: '9999px', background: '#0b1120', overflow: 'hidden', marginBottom: '8px' }}>
+                            <div
+                              style={{
+                                width: `${Math.min(100, Math.max(0, group.percentage))}%`,
+                                height: '100%',
+                                background: '#f43f5e'
+                              }}
+                            />
+                          </div>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {displayedEntries.map((entry, idx) => {
+                              const meta = SCHEDULE_CATEGORY_META[entry.category] || SCHEDULE_CATEGORY_META.other;
+                              return (
+                                <div
+                                  key={`${entry.dateKey}_${entry.eventId}_${idx}`}
+                                  style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    fontSize: '0.72rem',
+                                    color: '#cbd5e1',
+                                    background: 'rgba(15, 23, 42, 0.55)',
+                                    padding: '4px 7px',
+                                    borderRadius: '6px'
+                                  }}
+                                >
+                                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    <strong style={{ color: meta.color }}>{formatSpanishDateSlash(entry.dateKey)}</strong> ·{' '}
+                                    {entry.eventTitle}
+                                  </span>
+                                  <span style={{ fontSize: '0.66rem', color: '#94a3b8', flexShrink: 0 }}>
+                                    {entry.startTime}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {group.entries.length > 3 && (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              style={{ marginTop: '6px', minHeight: '24px', padding: '1px 6px', fontSize: '0.68rem', color: '#fda4af' }}
+                              onClick={() => setExpandedReasonGroupKey(isExpanded ? null : group.groupKey)}
+                            >
+                              {isExpanded ? 'Mostrar menos' : `Ver las ${group.entries.length} ocurrencias`}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {missedReasonsReport.missedWithoutReason > 0 && (
+                    <div style={{ fontSize: '0.72rem', color: '#94a3b8', textAlign: 'center' }}>
+                      + {missedReasonsReport.missedWithoutReason}{' '}
+                      {missedReasonsReport.missedWithoutReason === 1
+                        ? 'incumplimiento sin motivo escrito'
+                        : 'incumplimientos sin motivo escrito'}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
 
@@ -1614,6 +1867,23 @@ export const ScheduleView: React.FC = () => {
           )}
         </>
       )}
+      <MissedReasonModal
+        isOpen={Boolean(reasonDraft)}
+        eventTitle={reasonDraft?.event.title || ''}
+        dateKey={reasonDraft?.dateKey || todayKey}
+        initialReason={reasonDraft?.initialReason || ''}
+        existingGroups={missedReasonsGlobal.groups.map(g => ({
+          groupKey: g.groupKey,
+          displayLabel: g.displayLabel,
+          count: g.count
+        }))}
+        onSave={reason => {
+          if (!reasonDraft) return;
+          void setScheduleEventCheck(reasonDraft.dateKey, reasonDraft.event.id, 'missed', reason);
+          setReasonDraft(null);
+        }}
+        onCancel={() => setReasonDraft(null)}
+      />
     </main>
   );
 };

@@ -40,8 +40,15 @@ interface WeeklyCalendarGridProps {
   onSelectDateKey: (dateKey: string) => void;
   events: ScheduleEvent[];
   attendanceMap: Map<string, Record<string, ScheduleCheckStatus>>;
+  reasonsMap?: Map<string, Record<string, string>>;
   attendanceRecords?: ScheduleDayRecord[];
-  onSetCheck: (dateKey: string, eventId: string, status: ScheduleCheckStatus | null) => Promise<void>;
+  onSetCheck: (
+    dateKey: string,
+    eventId: string,
+    status: ScheduleCheckStatus | null,
+    reason?: string
+  ) => Promise<void>;
+  onRequestMissedReason?: (dateKey: string, event: ScheduleEvent, currentReason?: string) => void;
   onEditEvent: (event: ScheduleEvent) => void;
   onCreateEvent: () => void;
 }
@@ -205,8 +212,10 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
   onSelectDateKey,
   events,
   attendanceMap,
+  reasonsMap,
   attendanceRecords,
   onSetCheck,
+  onRequestMissedReason,
   onEditEvent,
   onCreateEvent
 }) => {
@@ -1026,51 +1035,86 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
 
             {!inspectedBlock.isTransport && (() => {
               const currentSt = (attendanceMap.get(inspectedBlock.dateKey) || {})[selectedEventObj.id];
+              const currentReason = (reasonsMap?.get(inspectedBlock.dateKey) || {})[selectedEventObj.id] || '';
               return (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onSetCheck(
-                        inspectedBlock.dateKey,
-                        selectedEventObj.id,
-                        currentSt === 'completed' ? null : 'completed'
-                      )
-                    }
-                    className="btn btn-sm"
-                    style={{
-                      minHeight: '38px',
-                      background:
-                        currentSt === 'completed' ? 'rgba(16, 185, 129, 0.25)' : 'var(--bg-input)',
-                      border: `1px solid ${currentSt === 'completed' ? '#10b981' : 'var(--border-color)'}`,
-                      color: currentSt === 'completed' ? '#6ee7b7' : 'var(--text-main)'
-                    }}
-                  >
-                    <CheckCircle2 size={15} />
-                    Cumplido
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onSetCheck(
-                        inspectedBlock.dateKey,
-                        selectedEventObj.id,
-                        currentSt === 'missed' ? null : 'missed'
-                      )
-                    }
-                    className="btn btn-sm"
-                    style={{
-                      minHeight: '38px',
-                      background:
-                        currentSt === 'missed' ? 'rgba(244, 63, 94, 0.25)' : 'var(--bg-input)',
-                      border: `1px solid ${currentSt === 'missed' ? '#f43f5e' : 'var(--border-color)'}`,
-                      color: currentSt === 'missed' ? '#fda4af' : 'var(--text-muted)'
-                    }}
-                  >
-                    <XCircle size={15} />
-                    No cumplido
-                  </button>
-                </div>
+                <>
+                  {currentSt === 'missed' && (
+                    <div
+                      style={{
+                        background: 'rgba(244, 63, 94, 0.12)',
+                        border: '1px solid rgba(244, 63, 94, 0.35)',
+                        borderRadius: '9px',
+                        padding: '7px 9px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '8px'
+                      }}
+                    >
+                      <div style={{ fontSize: '0.74rem', color: '#fecdd3', minWidth: 0, flex: 1 }}>
+                        <strong style={{ color: '#fb7185' }}>Motivo:</strong>{' '}
+                        {currentReason || <span style={{ color: '#94a3b8' }}>Sin motivo especificado</span>}
+                      </div>
+                      {onRequestMissedReason && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ minHeight: '26px', padding: '2px 7px', fontSize: '0.68rem', color: '#fda4af', flexShrink: 0 }}
+                          onClick={() => onRequestMissedReason(inspectedBlock.dateKey, selectedEventObj, currentReason)}
+                        >
+                          {currentReason ? 'Editar motivo' : 'Añadir motivo'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onSetCheck(
+                          inspectedBlock.dateKey,
+                          selectedEventObj.id,
+                          currentSt === 'completed' ? null : 'completed'
+                        )
+                      }
+                      className="btn btn-sm"
+                      style={{
+                        minHeight: '38px',
+                        background:
+                          currentSt === 'completed' ? 'rgba(16, 185, 129, 0.25)' : 'var(--bg-input)',
+                        border: `1px solid ${currentSt === 'completed' ? '#10b981' : 'var(--border-color)'}`,
+                        color: currentSt === 'completed' ? '#6ee7b7' : 'var(--text-main)'
+                      }}
+                    >
+                      <CheckCircle2 size={15} />
+                      Cumplido
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (currentSt === 'missed') {
+                          void onSetCheck(inspectedBlock.dateKey, selectedEventObj.id, null);
+                        } else if (onRequestMissedReason) {
+                          onRequestMissedReason(inspectedBlock.dateKey, selectedEventObj, currentReason);
+                        } else {
+                          void onSetCheck(inspectedBlock.dateKey, selectedEventObj.id, 'missed');
+                        }
+                      }}
+                      className="btn btn-sm"
+                      style={{
+                        minHeight: '38px',
+                        background:
+                          currentSt === 'missed' ? 'rgba(244, 63, 94, 0.25)' : 'var(--bg-input)',
+                        border: `1px solid ${currentSt === 'missed' ? '#f43f5e' : 'var(--border-color)'}`,
+                        color: currentSt === 'missed' ? '#fda4af' : 'var(--text-muted)'
+                      }}
+                    >
+                      <XCircle size={15} />
+                      No cumplido
+                    </button>
+                  </div>
+                </>
               );
             })()}
           </div>

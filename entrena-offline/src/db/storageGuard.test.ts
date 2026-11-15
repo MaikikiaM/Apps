@@ -233,7 +233,12 @@ describe('storageGuard - Validación, checksums y espejo local', () => {
           createdAt: 1700000000000
         }
       ],
-      [{ date: '2026-11-10', statuses: { ev_1: 'completed' }, updatedAt: 1700000000000 }]
+      [{
+        date: '2026-11-10',
+        statuses: { ev_1: 'completed', ev_2: 'missed' },
+        reasons: { ev_1: 'motivo huérfano ignorado', ev_2: '  Falta de tiempo  ' },
+        updatedAt: 1700000000000
+      }]
     );
 
     const v3Result = validateAndNormalizeBackupJson(JSON.stringify(v3Payload));
@@ -245,6 +250,8 @@ describe('storageGuard - Validación, checksums y espejo local', () => {
     expect(v3Result.payload?.scheduleEvents?.find(e => e.id === 'ev_3')?.transportBeforeMinutes).toBe(25);
     expect(v3Result.payload?.scheduleEvents?.find(e => e.id === 'ev_3')?.transportAfterMinutes).toBe(20);
     expect(v3Result.payload?.scheduleAttendance?.[0].statuses.ev_1).toBe('completed');
+    expect(v3Result.payload?.scheduleAttendance?.[0].reasons?.ev_2).toBe('Falta de tiempo');
+    expect(v3Result.payload?.scheduleAttendance?.[0].reasons?.ev_1).toBeUndefined();
 
     // Retrocompatibilidad v2 sin scheduleEvents/scheduleAttendance
     const v2Base = {

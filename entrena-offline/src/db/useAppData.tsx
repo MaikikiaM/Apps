@@ -51,6 +51,7 @@ interface AppDataContextValue {
   scheduleEvents: ScheduleEvent[];
   scheduleAttendance: ScheduleDayRecord[];
   attendanceMap: Map<string, Record<string, ScheduleCheckStatus>>;
+  scheduleReasonsMap: Map<string, Record<string, string>>;
   isLoading: boolean;
   externalReloadToken: number;
   activeLog: DailyWorkoutLog | null;
@@ -66,7 +67,12 @@ interface AppDataContextValue {
   updateSettings: (newSettings: AppSettings) => Promise<void>;
   saveScheduleEventItem: (event: ScheduleEvent) => Promise<void>;
   deleteScheduleEventItem: (id: string) => Promise<void>;
-  setScheduleEventCheck: (dateKey: string, eventId: string, status: ScheduleCheckStatus | null) => Promise<void>;
+  setScheduleEventCheck: (
+    dateKey: string,
+    eventId: string,
+    status: ScheduleCheckStatus | null,
+    reason?: string
+  ) => Promise<void>;
   setAllScheduleChecksForDate: (dateKey: string, eventIds: string[], status: ScheduleCheckStatus) => Promise<void>;
   loadDemoAndRefresh: () => Promise<void>;
   clearDataAndRefresh: () => Promise<void>;
@@ -187,6 +193,16 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return map;
   }, [scheduleAttendance]);
 
+  const scheduleReasonsMap = React.useMemo(() => {
+    const map = new Map<string, Record<string, string>>();
+    for (const rec of scheduleAttendance) {
+      if (rec.reasons && Object.keys(rec.reasons).length > 0) {
+        map.set(rec.date, rec.reasons);
+      }
+    }
+    return map;
+  }, [scheduleAttendance]);
+
   const activeLog = logsMap.get(selectedDateKey) || null;
 
   const saveCurrentLog = async (log: DailyWorkoutLog) => {
@@ -233,17 +249,32 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const setScheduleEventCheck = async (
     dateKey: string,
     eventId: string,
-    status: ScheduleCheckStatus | null
+    status: ScheduleCheckStatus | null,
+    reason?: string
   ) => {
     const prevStatuses = { ...(attendanceMap.get(dateKey) || {}) };
+    const prevReasons = { ...(scheduleReasonsMap.get(dateKey) || {}) };
     if (status === null) {
       delete prevStatuses[eventId];
+      delete prevReasons[eventId];
+    } else if (status === 'completed') {
+      prevStatuses[eventId] = 'completed';
+      delete prevReasons[eventId];
     } else {
-      prevStatuses[eventId] = status;
+      prevStatuses[eventId] = 'missed';
+      if (reason !== undefined) {
+        const cleanReason = reason.trim().replace(/\s+/g, ' ').slice(0, 160);
+        if (cleanReason) {
+          prevReasons[eventId] = cleanReason;
+        } else {
+          delete prevReasons[eventId];
+        }
+      }
     }
     await saveScheduleDayAttendance({
       date: dateKey,
       statuses: prevStatuses,
+      ...(Object.keys(prevReasons).length > 0 ? { reasons: prevReasons } : {}),
       updatedAt: Date.now()
     });
     await refreshData(false);
@@ -255,12 +286,17 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     status: ScheduleCheckStatus
   ) => {
     const nextStatuses = { ...(attendanceMap.get(dateKey) || {}) };
+    const nextReasons = { ...(scheduleReasonsMap.get(dateKey) || {}) };
     for (const id of eventIds) {
       nextStatuses[id] = status;
+      if (status === 'completed') {
+        delete nextReasons[id];
+      }
     }
     await saveScheduleDayAttendance({
       date: dateKey,
       statuses: nextStatuses,
+      ...(Object.keys(nextReasons).length > 0 ? { reasons: nextReasons } : {}),
       updatedAt: Date.now()
     });
     await refreshData(false);
@@ -306,6 +342,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         scheduleEvents,
         scheduleAttendance,
         attendanceMap,
+        scheduleReasonsMap,
         isLoading,
         externalReloadToken,
         activeLog,

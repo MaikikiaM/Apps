@@ -27,6 +27,11 @@ if (!fs.existsSync(zipalign)) throw new Error(`No se encontró ${zipalign}`);
 if (!fs.existsSync(apksigner)) throw new Error(`No se encontró ${apksigner}`);
 console.log('✓ Android SDK 34 detectado y listo');
 
+// 2. Compilar frontend Vite con base relativa antes de limpiar android-app (protege el keystore ante fallos)
+console.log('--- 2. Compilando frontend Vite ---');
+execSync('npm.cmd run build', { cwd: rootDir, stdio: 'inherit' });
+const distDir = path.join(rootDir, 'dist');
+
 const androidAppDir = path.join(rootDir, 'android-app');
 const existingKeystorePath = path.join(androidAppDir, 'release.keystore');
 let savedKeystoreBuf = null;
@@ -37,11 +42,9 @@ if (fs.existsSync(androidAppDir)) {
   fs.rmSync(androidAppDir, { recursive: true, force: true });
 }
 fs.mkdirSync(androidAppDir, { recursive: true });
-
-// 2. Compilar frontend Vite con base relativa
-console.log('--- 2. Compilando frontend Vite ---');
-execSync('npm.cmd run build', { cwd: rootDir, stdio: 'inherit' });
-const distDir = path.join(rootDir, 'dist');
+if (savedKeystoreBuf) {
+  fs.writeFileSync(existingKeystorePath, savedKeystoreBuf);
+}
 
 // 3. Crear estructura de recursos Android (res)
 console.log('--- 3. Generando recursos Android (iconos, strings, layout) ---');
@@ -53,7 +56,7 @@ fs.writeFileSync(
   path.join(valuesDir, 'strings.xml'),
   `<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">EntrenaOffline v2.1</string>
+    <string name="app_name">EntrenaOffline v2.2</string>
 </resources>`.trim()
 );
 
@@ -72,8 +75,8 @@ console.log('--- 4. Creando AndroidManifest.xml ---');
 const manifestXml = `<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.entrena.offline"
-    android:versionCode="12"
-    android:versionName="2.1">
+    android:versionCode="13"
+    android:versionName="2.2">
 
     <uses-sdk
         android:minSdkVersion="24"
@@ -711,14 +714,14 @@ if (savedKeystoreBuf) {
   );
 }
 
-const finalApkPath = path.join(rootDir, 'EntrenaOffline_v2.1.apk');
+const finalApkPath = path.join(rootDir, 'EntrenaOffline_v2.2.apk');
 execSync(
   `"${apksigner}" sign --ks "${keystorePath}" --ks-pass pass:entrena123 --out "${finalApkPath}" "${alignedApk}"`,
   { stdio: 'inherit' }
 );
 // Mantener también copia genérica
 fs.copyFileSync(finalApkPath, path.join(rootDir, 'EntrenaOffline.apk'));
-console.log('✓ APK firmado correctamente como EntrenaOffline_v2.1.apk');
+console.log('✓ APK firmado correctamente como EntrenaOffline_v2.2.apk');
 
 // 11. Verificar firma
 execSync(`"${apksigner}" verify --verbose "${finalApkPath}"`, { stdio: 'inherit' });

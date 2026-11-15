@@ -397,9 +397,18 @@ export function validateAndNormalizeBackupJson(jsonStr: string): ValidationResul
           cleanStatuses[evId] = val;
         }
       }
+      const rawReasons = rec.reasons && typeof rec.reasons === 'object' ? (rec.reasons as Record<string, unknown>) : {};
+      const cleanReasons: Record<string, string> = {};
+      for (const [evId, val] of Object.entries(rawReasons)) {
+        if (cleanStatuses[evId] === 'missed' && typeof val === 'string') {
+          const cleanText = val.trim().replace(/\s+/g, ' ').slice(0, 160);
+          if (cleanText) cleanReasons[evId] = cleanText;
+        }
+      }
       attMap.set(rec.date, {
         date: rec.date,
         statuses: cleanStatuses,
+        ...(Object.keys(cleanReasons).length > 0 ? { reasons: cleanReasons } : {}),
         updatedAt: typeof rec.updatedAt === 'number' && Number.isFinite(rec.updatedAt) ? rec.updatedAt : Date.now()
       });
     }

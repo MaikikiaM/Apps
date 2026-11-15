@@ -856,19 +856,33 @@ export async function seedDemoData(): Promise<void> {
     await txSched.objectStore('schedule_events').put(ev);
   }
 
+  const demoMissedReasons = [
+    'Falta de tiempo',
+    'Cansancio físico',
+    'falta de tiempo',
+    'Trabajo / Estudio',
+    'cansancio fisico',
+    'Falta de tiémpo'
+  ];
+
   for (let offset = 20; offset >= 1; offset--) {
     const dk = addDaysToDateKey(todayKey, -offset);
     const wd = getSpanishWeekdayIndex(dk);
     const statuses: Record<string, 'completed' | 'missed'> = {};
+    const reasons: Record<string, string> = {};
     for (const ev of demoScheduleEvents) {
       if (ev.daysOfWeek.includes(wd)) {
         const missed = (offset + ev.title.length) % 6 === 0;
         statuses[ev.id] = missed ? 'missed' : 'completed';
+        if (missed && ev.category !== 'transport') {
+          reasons[ev.id] = demoMissedReasons[(offset + ev.title.length) % demoMissedReasons.length];
+        }
       }
     }
     await txSched.objectStore('schedule_attendance').put({
       date: dk,
       statuses,
+      ...(Object.keys(reasons).length > 0 ? { reasons } : {}),
       updatedAt: Date.now()
     });
   }
