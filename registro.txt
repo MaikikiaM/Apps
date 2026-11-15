@@ -1414,3 +1414,20 @@ SESIÓN: 15/11/2026 - FICHA ENRIQUECIDA DE EVENTO EN CUADRO SEMANAL ENTRENA-OFFL
   * `npm.cmd run build:apk`: `tsc -b && vite build` sin errores y generado `EntrenaOffline_v2.0.apk` (0.31 MB, firma v2/v3 verificada con `apksigner`).
   * Inspección móvil en vivo (`360×800`): Al pulsar `Natación (piscina)` (`19:00–20:00`) con `Ida 20m` + `Vuelta 15m` y conectado con `S 10:00–11:30`, verificada la ficha completa con categoría, días/duración, `🔗 2 horarios`, franja exacta `🚌 Ida/Vuelta`, `Accuracy general (77.8% · 7/9 ses.)`, `Horas (este horario)` (`7h` / `Sem: 2h`) y `Actividad unificada`, con 0 errores de consola y 0 scroll horizontal.
 ================================================================================
+
+================================================================================
+SESIÓN: 15/11/2026 - ACCURACY POR CATEGORÍA, MODAL CENTRADO Y CUADRÍCULA AJUSTADA ENTRENA-OFFLINE v2.1
+================================================================================
+- Prompts literales del usuario:
+  * [15/11/2026 01:08]: "Molaria tener también un accuracy de la categoria y no solo del evento como tal. Btw, hace falta revisar lo de que al tocar salga algo. Yo lo que queria era una ventanita desplegable en medio, no que despues de la tabla salga algo de informacion. Eso, o que la tabla con todos los horarios ocupe la mitad de altura pq literalmente si apuro lo maximo psoible va de 8:00 a 22:30. Es decir, que la pestaña que sale debajo no aparece. Si quieres, con la informacion de que apurando a partir de las 8:00 veo las 22:30 podrias ajustarlo para que no tenga que bajar y subir en la pestaña de semana para tener acceso a todo. Prueba a ver qué tal por ahi"
+- Cambios técnicos implementados:
+  * Accuracy por categoría (`src/utils/scheduleStats.ts`): añadida interfaz `CategoryAccuracySummary` y campo `perCategory` en `ScheduleAccuracyReport` dentro de `computeScheduleAccuracy()`, agregando sesiones cumplidas, falladas, pendientes, total esperado y porcentaje por categoría ordenada según `VALID_SCHEDULE_CATEGORIES` (excluyendo `'transport'`).
+  * UI de Accuracy y filtros por categoría (`src/components/schedule/ScheduleView.tsx`): añadida tarjeta **Accuracy por Categoría** sobre **Accuracy por Evento** con badge, número de eventos, porcentaje, barra de progreso y botón rápido `Filtrar` / `Ver todo`, además de `<optgroup label="Por categoría">` en el selector de filtros (`cat:<category>`).
+  * Cuadrícula semanal compacta + modal flotante centrado (`src/components/schedule/WeeklyCalendarGrid.tsx`):
+    - Altura dinámica en modo `Ajustado` por defecto (`hourHeightPx = Math.max(24, Math.min(36, Math.floor(420 / Math.max(6, spanHours))))`) con rango ajustado para mostrar toda la jornada (`08:00`–`22:30`) en una sola pantalla móvil sin scroll vertical, y conmutador rápido `Ajustado` / `Ampliado` (`44px/h`) junto a `+ Evento` en la barra superior.
+    - Al pulsar cualquier evento o bloque de transporte se abre un diálogo modal centrado (`role="dialog"`, `position: fixed`, `inset: 0`, `zIndex: 80`, fondo difuminado con cierre por clic exterior o botón `×`) mostrando categoría, intervalo/duración, trayectos `Ida`/`Vuelta`, `Accuracy general`, `Acc. <Categoría>`, horas acumuladas y botones `Editar`, `Cumplido` y `No cumplido`.
+  * Versión elevada a `v2.1` (`package.json`, `index.html`, `TopHeader.tsx`, `scripts/build-apk.mjs` `versionCode="12"` -> `EntrenaOffline_v2.1.apk`) y documentación actualizada (`docs/ia/ESTADO.md`).
+- Verificación:
+  * `npm test`: 4/4 archivos de test, 24/24 tests Vitest superados (incluidas aserciones de `perCategory` en `src/utils/scheduleStats.test.ts`).
+  * `npm run build:apk`: build TypeScript/Vite PWA limpio y APK `EntrenaOffline_v2.1.apk` (0.31 MB, firmado v2/v3) verificado con `apksigner`.
+  * Verificación visual móvil (`360x800`, 0 errores de consola): modo `Ajustado` (`508.88px` vs `796.88px` en `Ampliado`) mostrando de `07:00` a `23:00` en pantalla completa, tarjeta `Accuracy por Categoría` con filtro por categoría y modal flotante centrado al tocar eventos.

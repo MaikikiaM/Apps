@@ -147,13 +147,33 @@ export const ScheduleView: React.FC = () => {
     ? groupByKeyMap.get(filterEventId.slice(6)) || null
     : null;
 
+  const activeFilterCategory = filterEventId.startsWith('cat:')
+    ? (filterEventId.slice(4) as ScheduleCategory)
+    : null;
+
+  const availableCategories = useMemo(() => {
+    const present = new Set<ScheduleCategory>();
+    for (const ev of sortedScheduleEvents) {
+      if (ev.category !== 'transport') present.add(ev.category);
+    }
+    return EVENT_SELECTABLE_CATEGORIES.filter(cat => present.has(cat));
+  }, [sortedScheduleEvents]);
+
+  const activeCategoryEventIds = useMemo(() => {
+    if (!activeFilterCategory) return null;
+    return sortedScheduleEvents.filter(ev => ev.category === activeFilterCategory).map(ev => ev.id);
+  }, [activeFilterCategory, sortedScheduleEvents]);
+
   const displayedHourGroups = useMemo(() => {
     if (activeFilterGroup) return [activeFilterGroup];
+    if (activeFilterCategory) {
+      return groupedHoursReport.groups.filter(g => g.category === activeFilterCategory);
+    }
     if (filterEventId !== 'all') {
       return groupedHoursReport.groups.filter(g => g.eventIds.includes(filterEventId));
     }
     return groupedHoursReport.groups;
-  }, [groupedHoursReport, activeFilterGroup, filterEventId]);
+  }, [groupedHoursReport, activeFilterGroup, activeFilterCategory, filterEventId]);
 
   const displayedHourTotals = useMemo(() => {
     return displayedHourGroups.reduce(
@@ -176,16 +196,18 @@ export const ScheduleView: React.FC = () => {
     return found;
   }, [formTitle, groupByKeyMap, editingId]);
 
-  // Informe de Accuracy (individual o agrupado por actividad)
+  // Informe de Accuracy (individual, por categoría o agrupado por actividad)
   const accuracyReport = useMemo(
     () =>
       computeScheduleAccuracy(scheduleEvents, scheduleAttendance, {
         rangeDays,
         todayKey,
-        filterEventId: filterEventId === 'all' || activeFilterGroup ? null : filterEventId,
-        filterEventIds: activeFilterGroup ? activeFilterGroup.eventIds : null
+        filterEventId: filterEventId === 'all' || activeFilterGroup || activeFilterCategory ? null : filterEventId,
+        filterEventIds: activeFilterGroup
+          ? activeFilterGroup.eventIds
+          : activeCategoryEventIds
       }),
-    [scheduleEvents, scheduleAttendance, rangeDays, todayKey, filterEventId, activeFilterGroup]
+    [scheduleEvents, scheduleAttendance, rangeDays, todayKey, filterEventId, activeFilterGroup, activeFilterCategory, activeCategoryEventIds]
   );
 
   // Gráfica de evolución Accuracy con fechas DD/MM
@@ -745,13 +767,22 @@ export const ScheduleView: React.FC = () => {
 
           {sortedScheduleEvents.length > 0 && (
             <div className="input-group">
-              <label className="input-label">Filtrar por evento o actividad agrupada</label>
+              <label className="input-label">Filtrar por evento, categoría o actividad</label>
               <select
                 className="input-field"
                 value={filterEventId}
                 onChange={e => setFilterEventId(e.target.value)}
               >
                 <option value="all">Todos los eventos del horario</option>
+                {availableCategories.length > 0 && (
+                  <optgroup label="Por categoría">
+                    {availableCategories.map(cat => (
+                      <option key={`cat:${cat}`} value={`cat:${cat}`}>
+                        🏷️ Categoría: {SCHEDULE_CATEGORY_META[cat].label}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
                 {connectedGroups.length > 0 && (
                   <optgroup label="Actividades agrupadas (mismo nombre)">
                     {connectedGroups.map(g => (
@@ -1042,6 +1073,82 @@ export const ScheduleView: React.FC = () => {
                             </div>
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Desglose por categoría */}
+          {accuracyReport.perCategory.length > 0 && (
+            <div className="card">
+              <div className="card-header">
+                <div className="card-title">
+                  <span>Accuracy por Categoría</span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {accuracyReport.perCategory.map(catItem => {
+                  const meta = SCHEDULE_CATEGORY_META[catItem.category] || SCHEDULE_CATEGORY_META.other;
+                  const pct = catItem.accuracyPercent;
+                  const isCatFiltered = filterEventId === `cat:${catItem.category}`;
+                  return (
+                    <div
+                      key={catItem.category}
+                      style={{
+                        background: 'var(--bg-subtle)',
+                        borderRadius: '10px',
+                        padding: '10px 12px',
+                        border: isCatFiltered ? `1px solid ${meta.color}` : '1px solid var(--border-color)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                        <div style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' }}>
+                          <span
+                            style={{
+                              fontSize: '0.76rem',
+                              fontWeight: 800,
+                              color: meta.color,
+                              background: meta.bg,
+                              padding: '2px 8px',
+                              borderRadius: '9999px'
+                            }}
+                          >
+                            {meta.label}
+                          </span>
+                          <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                            {catItem.eventsCount} {catItem.eventsCount === 1 ? 'horario' : 'horarios'}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            style={{ minHeight: '24px', padding: '1px 6px', fontSize: '0.68rem', color: '#38bdf8' }}
+                            onClick={() => setFilterEventId(isCatFiltered ? 'all' : `cat:${catItem.category}`)}
+                          >
+                            {isCatFiltered ? 'Ver todo' : 'Filtrar'}
+                          </button>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontWeight: 800, fontSize: '1.05rem', color: getAccuracyColor(pct) }}>
+                              {pct !== null ? `${pct}%` : '—'}
+                            </div>
+                            <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>
+                              {catItem.completed}/{catItem.expected}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ height: '6px', borderRadius: '9999px', background: '#0b1120', overflow: 'hidden' }}>
+                        <div
+                          style={{
+                            width: `${Math.min(100, Math.max(0, pct ?? 0))}%`,
+                            height: '100%',
+                            background: meta.color
+                          }}
+                        />
                       </div>
                     </div>
                   );

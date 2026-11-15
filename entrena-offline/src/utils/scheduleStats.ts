@@ -154,6 +154,17 @@ export interface EventAccuracySummary {
   accuracyPercent: number | null;
 }
 
+export interface CategoryAccuracySummary {
+  category: ScheduleCategory;
+  eventsCount: number;
+  completed: number;
+  missed: number;
+  unmarkedPast: number;
+  pendingToday: number;
+  expected: number;
+  accuracyPercent: number | null;
+}
+
 export interface DailyAccuracyPoint {
   date: string;
   completed: number;
@@ -172,6 +183,7 @@ export interface ScheduleAccuracyReport {
   currentDayStreak: number;
   bestDayStreak: number;
   perEvent: EventAccuracySummary[];
+  perCategory: CategoryAccuracySummary[];
   dailySeries: DailyAccuracyPoint[];
 }
 
@@ -210,6 +222,7 @@ export function computeScheduleAccuracy(
       currentDayStreak: 0,
       bestDayStreak: 0,
       perEvent: [],
+      perCategory: [],
       dailySeries: []
     };
   }
@@ -361,6 +374,52 @@ export function computeScheduleAccuracy(
       acc.expected > 0 ? Math.round((acc.completed / acc.expected) * 1000) / 10 : null
   }));
 
+  const categoryAccMap = new Map<
+    ScheduleCategory,
+    {
+      eventsCount: number;
+      completed: number;
+      missed: number;
+      unmarkedPast: number;
+      pendingToday: number;
+      expected: number;
+    }
+  >();
+  for (const item of perEvent) {
+    const prev = categoryAccMap.get(item.category) || {
+      eventsCount: 0,
+      completed: 0,
+      missed: 0,
+      unmarkedPast: 0,
+      pendingToday: 0,
+      expected: 0
+    };
+    prev.eventsCount += 1;
+    prev.completed += item.completed;
+    prev.missed += item.missed;
+    prev.unmarkedPast += item.unmarkedPast;
+    prev.pendingToday += item.pendingToday;
+    prev.expected += item.expected;
+    categoryAccMap.set(item.category, prev);
+  }
+
+  const perCategory: CategoryAccuracySummary[] = VALID_SCHEDULE_CATEGORIES
+    .filter(cat => cat !== 'transport' && categoryAccMap.has(cat))
+    .map(cat => {
+      const stats = categoryAccMap.get(cat)!;
+      return {
+        category: cat,
+        eventsCount: stats.eventsCount,
+        completed: stats.completed,
+        missed: stats.missed,
+        unmarkedPast: stats.unmarkedPast,
+        pendingToday: stats.pendingToday,
+        expected: stats.expected,
+        accuracyPercent:
+          stats.expected > 0 ? Math.round((stats.completed / stats.expected) * 1000) / 10 : null
+      };
+    });
+
   const accuracyPercent =
     totalExpected > 0 ? Math.round((totalCompleted / totalExpected) * 1000) / 10 : null;
   const markedTotal = totalCompleted + totalMissed;
@@ -378,6 +437,7 @@ export function computeScheduleAccuracy(
     currentDayStreak,
     bestDayStreak,
     perEvent,
+    perCategory,
     dailySeries
   };
 }

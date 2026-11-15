@@ -297,5 +297,19 @@ describe('Fechas estilo español y Horario / Accuracy', () => {
     });
     expect(groupAcc.perEvent).toHaveLength(2);
     expect(groupAcc.completed).toBe(3); // 04/11, 09/11, 11/11
+
+    // Verificar desglose Accuracy por Categoría
+    const allAcc = computeScheduleAccuracy([evCalcMon, evCalcWed, evSwim], attendance, {
+      rangeDays: 14,
+      todayKey: '2026-11-15'
+    });
+    const uniCat = allAcc.perCategory.find(c => c.category === 'university');
+    const swimCat = allAcc.perCategory.find(c => c.category === 'swim');
+    expect(uniCat).toBeDefined();
+    expect(uniCat?.eventsCount).toBe(2);
+    expect(uniCat?.completed).toBe(3);
+    expect(swimCat).toBeDefined();
+    expect(swimCat?.eventsCount).toBe(1);
+    expect(swimCat?.completed).toBe(1);
   });
 });

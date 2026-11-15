@@ -27,7 +27,7 @@ export const TopHeader: React.FC = () => {
             flexShrink: 0
           }}
         >
-          v2.0
+          v2.1
         </span>
       </div>
 
