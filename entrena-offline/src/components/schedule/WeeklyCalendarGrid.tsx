@@ -11,7 +11,7 @@ import {
   Plus,
   Calendar
 } from 'lucide-react';
-import { ScheduleCheckStatus, ScheduleEvent } from '../../types/models';
+import { ScheduleCheckStatus, ScheduleDayRecord, ScheduleEvent } from '../../types/models';
 import {
   addDaysToDateKey,
   formatChartSpanishDate,
@@ -20,8 +20,13 @@ import {
   toLocalDateKey
 } from '../../utils/dates';
 import {
+  computeGroupedEventHours,
+  computeScheduleAccuracy,
   EVENT_SELECTABLE_CATEGORIES,
+  formatHoursMinutesShort,
+  getEventDurationMinutes,
   minutesToHHMM,
+  normalizeEventGroupKey,
   SCHEDULE_CATEGORY_META,
   SPANISH_WEEKDAY_SHORT,
   sortScheduleEvents
@@ -34,6 +39,7 @@ interface WeeklyCalendarGridProps {
   onSelectDateKey: (dateKey: string) => void;
   events: ScheduleEvent[];
   attendanceMap: Map<string, Record<string, ScheduleCheckStatus>>;
+  attendanceRecords?: ScheduleDayRecord[];
   onSetCheck: (dateKey: string, eventId: string, status: ScheduleCheckStatus | null) => Promise<void>;
   onEditEvent: (event: ScheduleEvent) => void;
   onCreateEvent: () => void;
@@ -197,6 +203,7 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
   onSelectDateKey,
   events,
   attendanceMap,
+  attendanceRecords,
   onSetCheck,
   onEditEvent,
   onCreateEvent
@@ -274,6 +281,70 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
   const selectedEventObj = inspectedBlock
     ? events.find(ev => ev.id === inspectedBlock.eventId) || null
     : null;
+
+  const resolvedAttendanceRecords = useMemo<ScheduleDayRecord[]>(() => {
+    if (attendanceRecords) return attendanceRecords;
+    return Array.from(attendanceMap.entries()).map(([date, statuses]) => ({
+      date,
+      statuses,
+      updatedAt: 0
+    }));
+  }, [attendanceRecords, attendanceMap]);
+
+  const selectedEventInsights = useMemo(() => {
+    if (!selectedEventObj) return null;
+
+    const eventAccuracy = computeScheduleAccuracy(events, resolvedAttendanceRecords, {
+      rangeDays: null,
+      todayKey,
+      filterEventId: selectedEventObj.id
+    });
+
+    const groupedReport = computeGroupedEventHours(events, resolvedAttendanceRecords, todayKey);
+    const groupKey = normalizeEventGroupKey(selectedEventObj.title) || selectedEventObj.id;
+    const matchedGroup =
+      groupedReport.groups.find(g => g.groupKey === groupKey || g.eventIds.includes(selectedEventObj.id)) || null;
+
+    const groupAccuracy =
+      matchedGroup && matchedGroup.slotsCount > 1
+        ? computeScheduleAccuracy(events, resolvedAttendanceRecords, {
+            rangeDays: null,
+            todayKey,
+            filterEventIds: matchedGroup.eventIds
+          })
+        : null;
+
+    const singleHours = computeGroupedEventHours([selectedEventObj], resolvedAttendanceRecords, todayKey).groups[0] || null;
+
+    const startMin = parseTimeToMinutes(selectedEventObj.startTime);
+    const endMin = parseTimeToMinutes(selectedEventObj.endTime);
+    const beforeMin =
+      selectedEventObj.transportBeforeMinutes && selectedEventObj.transportBeforeMinutes > 0
+        ? selectedEventObj.transportBeforeMinutes
+        : 0;
+    const afterMin =
+      selectedEventObj.transportAfterMinutes && selectedEventObj.transportAfterMinutes > 0
+        ? selectedEventObj.transportAfterMinutes
+        : 0;
+
+    return {
+      meta: SCHEDULE_CATEGORY_META[selectedEventObj.category] || SCHEDULE_CATEGORY_META.other,
+      durationMin: getEventDurationMinutes(selectedEventObj),
+      daysText: [...selectedEventObj.daysOfWeek]
+        .sort((a, b) => a - b)
+        .map(d => SPANISH_WEEKDAY_SHORT[d])
+        .join(' · '),
+      beforeMin,
+      idaRange: beforeMin > 0 ? `${minutesToHHMM(Math.max(0, startMin - beforeMin))}–${selectedEventObj.startTime}` : null,
+      afterMin,
+      vueltaRange:
+        afterMin > 0 ? `${selectedEventObj.endTime}–${minutesToHHMM(Math.min(23 * 60 + 59, endMin + afterMin))}` : null,
+      eventAccuracy,
+      singleHours,
+      matchedGroup,
+      groupAccuracy
+    };
+  }, [selectedEventObj, events, resolvedAttendanceRecords, todayKey]);
 
   const weekStartLabel = formatChartSpanishDate(weekKeys[0]);
   const weekEndLabel = formatChartSpanishDate(weekKeys[6]);
@@ -635,7 +706,7 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
       )}
 
       {/* Tarjeta de detalle rápido al pulsar una clase o desplazamiento en el calendario */}
-      {selectedEventObj && inspectedBlock && (
+      {selectedEventObj && inspectedBlock && selectedEventInsights && (
         <div
           className="card"
           style={{
@@ -665,8 +736,79 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
                   ? `🚌 Transporte (${inspectedBlock.transportRole === 'before' ? 'Ida a' : 'Vuelta de'}: ${selectedEventObj.title})`
                   : selectedEventObj.title}
               </div>
+
+              {/* Etiquetas informativas del evento (categoría, días, duración, conexión) */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
+                <span
+                  style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    color: selectedEventInsights.meta.color,
+                    background: selectedEventInsights.meta.bg,
+                    padding: '2px 7px',
+                    borderRadius: '9999px'
+                  }}
+                >
+                  {selectedEventInsights.meta.label}
+                </span>
+                <span
+                  style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    color: '#cbd5e1',
+                    background: 'rgba(148, 163, 184, 0.16)',
+                    padding: '2px 7px',
+                    borderRadius: '9999px'
+                  }}
+                >
+                  {selectedEventInsights.daysText} · {selectedEventObj.startTime}–{selectedEventObj.endTime} (
+                  {formatHoursMinutesShort(selectedEventInsights.durationMin)})
+                </span>
+                {selectedEventInsights.matchedGroup && selectedEventInsights.matchedGroup.slotsCount > 1 && (
+                  <span
+                    style={{
+                      fontSize: '0.7rem',
+                      fontWeight: 700,
+                      color: '#67e8f9',
+                      background: 'rgba(6, 182, 212, 0.16)',
+                      padding: '2px 7px',
+                      borderRadius: '9999px'
+                    }}
+                  >
+                    🔗 {selectedEventInsights.matchedGroup.slotsCount} horarios
+                  </span>
+                )}
+              </div>
+
+              {/* Detalle de desplazamiento Ida / Vuelta si tiene */}
+              {(selectedEventInsights.beforeMin > 0 || selectedEventInsights.afterMin > 0) && (
+                <div
+                  style={{
+                    marginTop: '6px',
+                    padding: '5px 8px',
+                    borderRadius: '8px',
+                    background: 'rgba(148, 163, 184, 0.1)',
+                    border: '1px dashed rgba(148, 163, 184, 0.3)',
+                    fontSize: '0.72rem',
+                    color: '#cbd5e1'
+                  }}
+                >
+                  🚌{' '}
+                  {[
+                    selectedEventInsights.beforeMin > 0
+                      ? `Ida ${selectedEventInsights.beforeMin}m (${selectedEventInsights.idaRange})`
+                      : null,
+                    selectedEventInsights.afterMin > 0
+                      ? `Vuelta ${selectedEventInsights.afterMin}m (${selectedEventInsights.vueltaRange})`
+                      : null
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </div>
+              )}
+
               {inspectedBlock.isTransport && (
-                <div style={{ fontSize: '0.74rem', color: '#94a3b8', marginTop: '3px' }}>
+                <div style={{ fontSize: '0.74rem', color: '#94a3b8', marginTop: '5px' }}>
                   Bloque complementario de desplazamiento · No computa en Accuracy
                 </div>
               )}
@@ -674,13 +816,95 @@ export const WeeklyCalendarGrid: React.FC<WeeklyCalendarGridProps> = ({
             <button
               type="button"
               className="btn btn-secondary btn-sm"
-              style={{ minHeight: '30px', padding: '4px 9px', fontSize: '0.74rem' }}
+              style={{ minHeight: '30px', padding: '4px 9px', fontSize: '0.74rem', flexShrink: 0 }}
               onClick={() => onEditEvent(selectedEventObj)}
             >
               <Edit2 size={13} />
               Editar
             </button>
           </div>
+
+          {/* Accuracy general y horas acumuladas del evento (y del grupo conectado si existe) */}
+          {!inspectedBlock.isTransport && (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns:
+                  selectedEventInsights.groupAccuracy ? 'repeat(3, minmax(0, 1fr))' : 'repeat(2, minmax(0, 1fr))',
+                gap: '6px'
+              }}
+            >
+              <div
+                style={{
+                  background: '#0b1120',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '9px',
+                  padding: '6px 8px'
+                }}
+              >
+                <div style={{ fontSize: '0.64rem', color: '#94a3b8', fontWeight: 700 }}>Accuracy general</div>
+                <div
+                  style={{
+                    fontSize: '0.92rem',
+                    fontWeight: 800,
+                    color:
+                      selectedEventInsights.eventAccuracy.accuracyPercent === null
+                        ? '#94a3b8'
+                        : selectedEventInsights.eventAccuracy.accuracyPercent >= 80
+                        ? '#10b981'
+                        : selectedEventInsights.eventAccuracy.accuracyPercent >= 60
+                        ? '#f59e0b'
+                        : '#f43f5e'
+                  }}
+                >
+                  {selectedEventInsights.eventAccuracy.accuracyPercent !== null
+                    ? `${selectedEventInsights.eventAccuracy.accuracyPercent}%`
+                    : '—'}
+                </div>
+                <div style={{ fontSize: '0.64rem', color: '#64748b' }}>
+                  {selectedEventInsights.eventAccuracy.completed}/{selectedEventInsights.eventAccuracy.expected} ses.
+                </div>
+              </div>
+
+              <div
+                style={{
+                  background: '#0b1120',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '9px',
+                  padding: '6px 8px'
+                }}
+              >
+                <div style={{ fontSize: '0.64rem', color: '#94a3b8', fontWeight: 700 }}>Horas (este horario)</div>
+                <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#38bdf8' }}>
+                  {formatHoursMinutesShort(selectedEventInsights.singleHours?.historicalMinutes || 0)}
+                </div>
+                <div style={{ fontSize: '0.64rem', color: '#64748b' }}>
+                  Sem: {formatHoursMinutesShort(selectedEventInsights.singleHours?.weeklyMinutes || 0)}
+                </div>
+              </div>
+
+              {selectedEventInsights.groupAccuracy && selectedEventInsights.matchedGroup && (
+                <div
+                  style={{
+                    background: '#0b1120',
+                    border: '1px solid rgba(56, 189, 248, 0.35)',
+                    borderRadius: '9px',
+                    padding: '6px 8px'
+                  }}
+                >
+                  <div style={{ fontSize: '0.64rem', color: '#67e8f9', fontWeight: 700 }}>Actividad unificada</div>
+                  <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#f8fafc' }}>
+                    {selectedEventInsights.groupAccuracy.accuracyPercent !== null
+                      ? `${selectedEventInsights.groupAccuracy.accuracyPercent}%`
+                      : '—'}
+                  </div>
+                  <div style={{ fontSize: '0.64rem', color: '#94a3b8' }}>
+                    Total: {formatHoursMinutesShort(selectedEventInsights.matchedGroup.historicalMinutes)}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {!inspectedBlock.isTransport && (() => {
             const currentSt = (attendanceMap.get(inspectedBlock.dateKey) || {})[selectedEventObj.id];

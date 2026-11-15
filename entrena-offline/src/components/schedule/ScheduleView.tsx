@@ -359,6 +359,7 @@ export const ScheduleView: React.FC = () => {
           onSelectDateKey={setSelectedDateKey}
           events={sortedScheduleEvents}
           attendanceMap={attendanceMap}
+          attendanceRecords={scheduleAttendance}
           onSetCheck={setScheduleEventCheck}
           onEditEvent={openEditEventForm}
           onCreateEvent={openNewEventForm}

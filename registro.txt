@@ -1395,3 +1395,22 @@ SESIÓN: 15/11/2026 - AGRUPACIÓN POR NOMBRE Y HORAS REALIZADAS (SEMANA/MES/AÑO
   * `npm.cmd run build:apk`: `tsc -b && vite build` sin errores y generado `EntrenaOffline_v1.9.apk` (0.31 MB, firma v2/v3 verificada con `apksigner`).
   * Inspección móvil en vivo (`360×800`): Al crear un segundo horario de `"Natación (piscina)"` (`S · 10:00–11:30`), detectó la conexión al vuelo, vinculó ambos tramos (`🔗 2 horarios`), calculó `Semana / Mes / Año / Histórico` y permitió filtrar el Accuracy unificado, con 0 errores de consola y 0 scroll horizontal.
 ================================================================================
+
+================================================================================
+SESIÓN: 15/11/2026 - FICHA ENRIQUECIDA DE EVENTO EN CUADRO SEMANAL ENTRENA-OFFLINE v2.0
+================================================================================
+- Prompts literales del usuario:
+  * [15/11/2026 00:47]: "Tb molaria que al tocar un evento en la zona de la semana mostrase información de él (su intervalo horario, ida y vuelta si tiene, acuraccy general...)"
+- Cambios y Soluciones Aplicadas:
+  * `src/components/schedule/WeeklyCalendarGrid.tsx` y `src/components/schedule/ScheduleView.tsx`:
+    - Pasada la historia completa `scheduleAttendance` (`attendanceRecords`) a `WeeklyCalendarGrid` para calcular estadísticas en vivo sin recargas.
+    - Enriquecida la tarjeta inferior al pulsar cualquier evento o bloque de transporte en la cuadrícula semanal (`Semana`):
+      1. Insignias con categoría (`Natación`, `Conservatorio`, etc.), días e intervalo + duración (`L · X · V · 19:00–20:00 (1h)`) y conexión con otros horarios (`🔗 N horarios`).
+      2. Franja de transporte complementario con horarios calculados (`🚌 Ida 20m (18:40–19:00) · Vuelta 15m (20:00–20:15)`), visible tanto al pulsar el evento principal como el bloque de desplazamiento.
+      3. Panel de métricas con **Accuracy general** (`%` y `completados/esperados`), **Horas (este horario)** (histórico y semana) y, si comparte nombre con otros intervalos, **Actividad unificada** (`%` combinado y horas totales acumuladas), además de los botones `Editar`, `Cumplido` y `No cumplido`.
+  * Bump de versión a `v2.0` (`versionCode="11"`, `EntrenaOffline_v2.0.apk`).
+- Verificación:
+  * `npm.cmd test`: 24/24 pruebas Vitest pasadas en 4 archivos.
+  * `npm.cmd run build:apk`: `tsc -b && vite build` sin errores y generado `EntrenaOffline_v2.0.apk` (0.31 MB, firma v2/v3 verificada con `apksigner`).
+  * Inspección móvil en vivo (`360×800`): Al pulsar `Natación (piscina)` (`19:00–20:00`) con `Ida 20m` + `Vuelta 15m` y conectado con `S 10:00–11:30`, verificada la ficha completa con categoría, días/duración, `🔗 2 horarios`, franja exacta `🚌 Ida/Vuelta`, `Accuracy general (77.8% · 7/9 ses.)`, `Horas (este horario)` (`7h` / `Sem: 2h`) y `Actividad unificada`, con 0 errores de consola y 0 scroll horizontal.
+================================================================================
